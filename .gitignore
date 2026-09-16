@@ -1,0 +1,9 @@
+# 개인정보와 비밀번호가 들어갈 수 있는 파일은 저장소에 올리지 않습니다.
+.streamlit/secrets.toml
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.pyc
+.venv/
+venv/
