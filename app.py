@@ -387,7 +387,48 @@ def inject_global_style() -> None:
         html, body, .stApp, [class*="css"] {
             font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif !important;
         }
-        html, body, .stApp { background: #f5f7fa; color: #172033; }
+        html, body, .stApp, [data-testid="stAppViewContainer"],
+        [data-testid="stMain"], [data-testid="stMainBlockContainer"] {
+            background: #f5f7fa !important;
+            color: #172033 !important;
+            color-scheme: light !important;
+        }
+        .stApp p, .stApp label, .stApp small,
+        .stApp [data-testid="stMarkdownContainer"],
+        .stApp [data-testid="stMarkdownContainer"] p,
+        .stApp [data-testid="stWidgetLabel"],
+        .stApp [data-testid="stWidgetLabel"] p,
+        .stApp [data-testid="stCaptionContainer"],
+        .stApp [data-testid="stExpander"] summary,
+        .stApp [role="radiogroup"] label,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] span {
+            color: #172033 !important;
+            -webkit-text-fill-color: #172033 !important;
+        }
+        .stApp input, .stApp textarea {
+            background: #ffffff !important;
+            color: #172033 !important;
+            -webkit-text-fill-color: #172033 !important;
+            caret-color: #172033 !important;
+        }
+        .stApp input::placeholder, .stApp textarea::placeholder {
+            color: #7b8797 !important;
+            -webkit-text-fill-color: #7b8797 !important;
+            opacity: 1 !important;
+        }
+        .stApp [data-baseweb="select"] > div,
+        .stApp [data-baseweb="base-input"],
+        .stApp [data-baseweb="input"] {
+            background: #ffffff !important;
+            color: #172033 !important;
+        }
+        .stApp [data-baseweb="select"] span,
+        .stApp [data-baseweb="select"] div {
+            color: #172033 !important;
+            -webkit-text-fill-color: #172033 !important;
+        }
         [data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer { display: none !important; }
         [data-testid="stHeaderActionElements"], a.anchor-link,
         h1 > a, h2 > a, h3 > a, h4 > a, h5 > a, h6 > a { display: none !important; }
@@ -415,7 +456,11 @@ def inject_global_style() -> None:
         .status-step.current { background: #17355f; border-color: #17355f; color: #fff; font-weight: 700; }
         .stButton > button, .stDownloadButton > button {
             border-radius: 9px; min-height: 2.75rem; font-weight: 700;
-            border: 1px solid #23466f; background: #23466f; color: #fff;
+            border: 1px solid #23466f; background: #23466f; color: #fff !important;
+            -webkit-text-fill-color: #fff !important;
+        }
+        .stButton > button *, .stDownloadButton > button * {
+            color: #fff !important; -webkit-text-fill-color: #fff !important;
         }
         .stButton > button:hover, .stDownloadButton > button:hover {
             border-color: #17355f; background: #17355f; color: #fff;
@@ -423,8 +468,16 @@ def inject_global_style() -> None:
         [data-testid="stForm"] { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; }
         [data-testid="stMetric"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: .8rem 1rem; }
         [data-testid="stExpander"] { background: #fff; border-color: #e2e8f0; border-radius: 12px; }
-        [data-testid="stSidebar"] { background: #eef2f6; border-right: 1px solid #dce3eb; }
-        [data-testid="stFileUploaderDropzone"] { background: #f8fafc; border: 1px dashed #aab7c7; }
+        [data-testid="stSidebar"] { background: #eef2f6 !important; border-right: 1px solid #dce3eb; }
+        [data-testid="stFileUploaderDropzone"] { background: #f8fafc !important; border: 1px dashed #aab7c7; }
+        [data-testid="stFileUploaderDropzone"] * {
+            color: #172033 !important; -webkit-text-fill-color: #172033 !important;
+        }
+        @media (max-width: 768px) {
+            .block-container { padding: 1rem .85rem 3rem !important; }
+            .app-title { font-size: 1.45rem; }
+            .app-subtitle { font-size: .92rem; }
+        }
         </style>
         """,
         unsafe_allow_html=True,

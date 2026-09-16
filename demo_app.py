@@ -14,8 +14,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-import streamlit as st
-
 import app as core
 
 
@@ -208,11 +206,6 @@ def create_demo_order(values: dict[str, Any]) -> int:
         return int(cursor.lastrowid)
 
 
-def demo_header(description: str) -> None:
-    original_app_header(description)
-    st.info("지인 공유용 데모입니다. 실제 결제와 실제 발주에는 사용하지 마세요.")
-
-
 # app.py가 사용하는 저장 함수와 설정만 데모용으로 교체합니다.
 core.DATABASE_URL = "sqlite-demo-mode"
 core.ADMIN_ID = DEMO_ADMIN_ID
@@ -221,8 +214,6 @@ core.db_connection = demo_db_connection
 core.init_db = init_demo_db
 core.register_user = register_demo_user
 core.create_order = create_demo_order
-original_app_header = core.app_header
-core.app_header = demo_header
 
 
 if __name__ == "__main__":
