@@ -580,10 +580,34 @@ def inject_global_style() -> None:
         [data-testid="stDownloadButton"] button span {
             color: #ffffff !important; -webkit-text-fill-color: #ffffff !important;
         }
+        .stApp [data-testid="stButton"] button [data-testid="stMarkdownContainer"],
+        .stApp [data-testid="stButton"] button [data-testid="stMarkdownContainer"] p,
+        .stApp [data-testid="stButton"] button [data-testid="stMarkdownContainer"] span,
+        .stApp [data-testid="stFormSubmitButton"] button [data-testid="stMarkdownContainer"],
+        .stApp [data-testid="stFormSubmitButton"] button [data-testid="stMarkdownContainer"] p,
+        .stApp [data-testid="stFormSubmitButton"] button [data-testid="stMarkdownContainer"] span,
+        .stApp button[data-testid^="stBaseButton"] [data-testid="stMarkdownContainer"],
+        .stApp button[data-testid^="stBaseButton"] [data-testid="stMarkdownContainer"] p,
+        .stApp button[data-testid^="stBaseButton"] [data-testid="stMarkdownContainer"] span {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+        }
         [data-testid="stButton"] button:hover,
         [data-testid="stFormSubmitButton"] button:hover,
         [data-testid="stDownloadButton"] button:hover {
             border-color: #183b59 !important; background: #183b59 !important;
+        }
+        [data-testid="stButton"] button:disabled {
+            border-color: #cbd5df !important;
+            background: #e7ecf2 !important;
+            cursor: not-allowed !important;
+            opacity: 1 !important;
+        }
+        [data-testid="stButton"] button:disabled *,
+        [data-testid="stButton"] button:disabled p,
+        [data-testid="stButton"] button:disabled span {
+            color: #7b8797 !important;
+            -webkit-text-fill-color: #7b8797 !important;
         }
         [data-testid="stDialog"] > div,
         [data-testid="stDialog"] section,
@@ -685,6 +709,14 @@ def initialize_session() -> None:
         "show_order_auth": False,
         "auth_alert": "",
         "auth_alert_nonce": 0,
+        "customer_page": "새 견적",
+        "customer_last_page": "새 견적",
+        "customer_previous_page": "새 견적",
+        "customer_has_history": False,
+        "admin_top_menu": "전체 주문 관리",
+        "admin_last_page": "전체 주문 관리",
+        "admin_previous_page": "전체 주문 관리",
+        "admin_has_history": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -702,6 +734,14 @@ def logout() -> None:
         "show_order_auth",
         "auth_alert",
         "auth_alert_nonce",
+        "customer_page",
+        "customer_last_page",
+        "customer_previous_page",
+        "customer_has_history",
+        "admin_top_menu",
+        "admin_last_page",
+        "admin_previous_page",
+        "admin_has_history",
     ]:
         if key in st.session_state:
             del st.session_state[key]
@@ -713,6 +753,47 @@ def set_login_session(user: dict[str, Any]) -> None:
     st.session_state.username = user["username"]
     st.session_state.role = user["role"] or "customer"
     st.session_state.phone = user["phone"] or ""
+
+
+def remember_navigation(scope: str, default_page: str) -> None:
+    """라디오 메뉴 변경 전 화면을 기억해 사이드 이전 버튼에 연결합니다."""
+    page_key = "admin_top_menu" if scope == "admin" else f"{scope}_page"
+    last_key = f"{scope}_last_page"
+    previous_key = f"{scope}_previous_page"
+    history_key = f"{scope}_has_history"
+    selected_page = st.session_state.get(page_key, default_page)
+    last_page = st.session_state.get(last_key, default_page)
+    if selected_page != last_page:
+        st.session_state[previous_key] = last_page
+        st.session_state[last_key] = selected_page
+        st.session_state[history_key] = True
+
+
+def go_to_previous_page(scope: str, default_page: str) -> None:
+    """현재 메뉴와 직전 메뉴를 맞바꿔 자연스러운 이전 이동을 제공합니다."""
+    page_key = "admin_top_menu" if scope == "admin" else f"{scope}_page"
+    last_key = f"{scope}_last_page"
+    previous_key = f"{scope}_previous_page"
+    current_page = st.session_state.get(page_key, default_page)
+    previous_page = st.session_state.get(previous_key, default_page)
+    st.session_state[page_key] = previous_page
+    st.session_state[last_key] = previous_page
+    st.session_state[previous_key] = current_page
+    st.session_state[f"{scope}_has_history"] = True
+
+
+def render_sidebar_back(scope: str, default_page: str) -> None:
+    """로그인 후 모든 상세 메뉴에서 공통으로 사용하는 이전 버튼입니다."""
+    can_go_back = bool(st.session_state.get(f"{scope}_has_history", False))
+    if st.button(
+        "← 이전 화면",
+        key=f"{scope}_back_button",
+        use_container_width=True,
+        disabled=not can_go_back,
+        help="직전에 보던 메뉴로 돌아갑니다." if can_go_back else "이전 화면이 없습니다.",
+    ):
+        go_to_previous_page(scope, default_page)
+        st.rerun()
 
 
 def complete_pending_order() -> int | None:
@@ -1039,7 +1120,7 @@ def render_auth(embedded: bool = False) -> None:
                         complete_pending_order()
                         st.rerun()
 
-    if embedded and st.button("로그인 창 닫기", use_container_width=True):
+    if embedded and st.button("← 이전 화면으로", use_container_width=True):
         st.session_state.show_order_auth = False
         st.session_state.pending_order = None
         st.rerun()
@@ -1066,7 +1147,15 @@ def customer_sidebar() -> str:
     with st.sidebar:
         st.markdown(f"### {html.escape(st.session_state.username)} 님")
         st.caption(st.session_state.phone or "휴대폰 번호 미등록")
-        page = st.radio("메뉴", ["새 견적", "내 주문 내역", "계정 설정"])
+        render_sidebar_back("customer", "새 견적")
+        st.divider()
+        page = st.radio(
+            "메뉴",
+            ["새 견적", "내 주문 내역", "계정 설정"],
+            key="customer_page",
+            on_change=remember_navigation,
+            args=("customer", "새 견적"),
+        )
         st.divider()
         if st.button("로그아웃", use_container_width=True):
             logout()
@@ -1400,6 +1489,13 @@ def render_account_settings(is_admin: bool) -> None:
 # 대표 관리자 화면
 # -----------------------------------------------------------------------------
 def admin_sidebar() -> str:
+    with st.sidebar:
+        st.markdown("### 대표자 관리")
+        st.caption(f"로그인 계정: {ADMIN_ID}")
+        render_sidebar_back("admin", "전체 주문 관리")
+        st.divider()
+        st.caption("상단 메뉴에서 관리 화면을 선택할 수 있습니다.")
+
     identity, logout_column = st.columns([4, 1])
     with identity:
         st.markdown(
@@ -1415,6 +1511,8 @@ def admin_sidebar() -> str:
         ["전체 주문 관리", "가격 설정", "회원 연락처", "계정 설정"],
         horizontal=True,
         key="admin_top_menu",
+        on_change=remember_navigation,
+        args=("admin", "전체 주문 관리"),
     )
     st.divider()
     return page
@@ -1616,7 +1714,9 @@ def main() -> None:
     st.set_page_config(
         page_title=APP_TITLE,
         layout="wide",
-        initial_sidebar_state="collapsed",
+        initial_sidebar_state=(
+            "expanded" if st.session_state.get("logged_in", False) else "collapsed"
+        ),
         page_icon=None,
     )
     inject_global_style()
