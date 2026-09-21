@@ -459,7 +459,7 @@ def inject_global_style() -> None:
         """
         <meta name="google" content="notranslate">
         <style>
-        :root { color-scheme: light; }
+        :root, html { color-scheme: only light !important; }
         html, body, .stApp, [class*="css"] {
             font-family: "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif !important;
         }
@@ -467,7 +467,7 @@ def inject_global_style() -> None:
         [data-testid="stMain"], [data-testid="stMainBlockContainer"] {
             background: #f5f7fa !important;
             color: #293548 !important;
-            color-scheme: light !important;
+            color-scheme: only light !important;
         }
         .stApp p, .stApp label, .stApp small,
         .stApp [data-testid="stMarkdownContainer"],
@@ -510,7 +510,7 @@ def inject_global_style() -> None:
         h1 > a, h2 > a, h3 > a, h4 > a, h5 > a, h6 > a { display: none !important; }
         a { text-decoration: none !important; }
         .block-container { max-width: 1180px; padding-top: 2rem; padding-bottom: 4rem; }
-        .app-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.04em; color: #38556f; }
+        .app-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.04em; color: #233f5a; }
         .app-title.centered { text-align: center; margin: .35rem 0 1rem; }
         .app-subtitle { color: #64748b; margin-top: .25rem; margin-bottom: 1.35rem; }
         .section-title { font-size: 1.22rem; font-weight: 750; color: #293548; margin: .2rem 0 1rem; }
@@ -519,7 +519,7 @@ def inject_global_style() -> None:
             padding: .8rem 1rem; margin-bottom: 1rem; background: #ffffff;
             border: 1px solid #e2e8f0; border-radius: 12px;
         }
-        .top-bar strong { color: #557a95; }
+        .top-bar strong { color: #254f73; }
         .process-grid {
             display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .7rem;
             margin: .25rem 0 1.4rem;
@@ -528,7 +528,7 @@ def inject_global_style() -> None:
             background: #ffffff; border: 1px solid #e2e8f0; border-radius: 11px;
             padding: .8rem .9rem; color: #435268; font-size: .9rem;
         }
-        .process-item b { display: block; color: #557a95; margin-bottom: .2rem; }
+        .process-item b { display: block; color: #254f73; margin-bottom: .2rem; }
         .soft-card {
             background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px;
             padding: 1.05rem 1.15rem; box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
@@ -547,17 +547,17 @@ def inject_global_style() -> None:
             background: #f3f8ff; border: 1px solid #cfe2f7; border-radius: 14px;
             padding: 1rem 1.1rem; margin: 1rem 0;
         }
-        .money { font-size: 1.45rem; font-weight: 800; color: #557a95; }
+        .money { font-size: 1.45rem; font-weight: 800; color: #254f73; }
         .status-row { display: flex; flex-wrap: wrap; gap: 7px; margin: .55rem 0 .25rem; }
         .status-step {
             padding: 5px 9px; border-radius: 999px; border: 1px solid #dbe3ed;
             background: #f8fafc; color: #8793a5; font-size: .78rem;
         }
-        .status-step.done { background: #eef4f7; border-color: #c6d7e2; color: #557a95; }
-        .status-step.current { background: #557a95; border-color: #557a95; color: #fff; font-weight: 700; }
+        .status-step.done { background: #edf3f8; border-color: #c4d4e1; color: #254f73; }
+        .status-step.current { background: #254f73; border-color: #254f73; color: #fff; font-weight: 700; }
         .stButton > button, .stDownloadButton > button {
             border-radius: 9px; min-height: 2.75rem; font-weight: 700;
-            border: 1px solid #557a95; background: #557a95; color: #fff !important;
+            border: 1px solid #254f73; background: #254f73; color: #fff !important;
             -webkit-text-fill-color: #fff !important;
         }
         .stButton > button *, .stButton > button p, .stButton > button span,
@@ -565,12 +565,12 @@ def inject_global_style() -> None:
             color: #fff !important; -webkit-text-fill-color: #fff !important;
         }
         .stButton > button:hover, .stDownloadButton > button:hover {
-            border-color: #466a84; background: #466a84; color: #fff;
+            border-color: #183b59; background: #183b59; color: #fff;
         }
         [data-testid="stButton"] button,
         [data-testid="stFormSubmitButton"] button,
         [data-testid="stDownloadButton"] button {
-            border-color: #557a95 !important; background: #557a95 !important;
+            border-color: #254f73 !important; background: #254f73 !important;
         }
         [data-testid="stButton"] button p,
         [data-testid="stButton"] button span,
@@ -583,7 +583,14 @@ def inject_global_style() -> None:
         [data-testid="stButton"] button:hover,
         [data-testid="stFormSubmitButton"] button:hover,
         [data-testid="stDownloadButton"] button:hover {
-            border-color: #466a84 !important; background: #466a84 !important;
+            border-color: #183b59 !important; background: #183b59 !important;
+        }
+        [data-testid="stDialog"] > div,
+        [data-testid="stDialog"] section,
+        [data-testid="stDialog"] [role="dialog"] {
+            background: #ffffff !important;
+            color: #293548 !important;
+            color-scheme: only light !important;
         }
         [data-testid="stForm"] { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; }
         [data-testid="stMetric"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: .8rem 1rem; }
@@ -600,7 +607,23 @@ def inject_global_style() -> None:
             .process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .top-bar { align-items: flex-start; flex-direction: column; }
             .stApp, .stApp p, .stApp label, .stApp span, .stApp div {
-                color-scheme: light !important;
+                color-scheme: only light !important;
+            }
+        }
+        @media (prefers-color-scheme: dark) {
+            html, body, .stApp, [data-testid="stAppViewContainer"],
+            [data-testid="stMain"], [data-testid="stMainBlockContainer"] {
+                background: #f5f7fa !important;
+                color: #293548 !important;
+                color-scheme: only light !important;
+            }
+            .stApp input, .stApp textarea,
+            .stApp [data-baseweb="select"] > div,
+            .stApp [data-baseweb="base-input"],
+            .stApp [data-baseweb="input"] {
+                background: #ffffff !important;
+                color: #293548 !important;
+                -webkit-text-fill-color: #293548 !important;
             }
         }
         </style>
@@ -1022,6 +1045,20 @@ def render_auth(embedded: bool = False) -> None:
         st.rerun()
 
 
+def close_auth_dialog() -> None:
+    st.session_state.show_order_auth = False
+
+
+@st.dialog(
+    "로그인 및 회원가입",
+    width="large",
+    dismissible=True,
+    on_dismiss=close_auth_dialog,
+)
+def render_auth_dialog() -> None:
+    render_auth(embedded=True)
+
+
 # -----------------------------------------------------------------------------
 # 고객 화면
 # -----------------------------------------------------------------------------
@@ -1080,8 +1117,7 @@ def render_public_home() -> None:
     )
     render_new_order(show_header=False)
     if st.session_state.show_order_auth:
-        st.divider()
-        render_auth(embedded=True)
+        render_auth_dialog()
 
 
 def render_new_order(show_header: bool = True) -> None:
@@ -1364,13 +1400,23 @@ def render_account_settings(is_admin: bool) -> None:
 # 대표 관리자 화면
 # -----------------------------------------------------------------------------
 def admin_sidebar() -> str:
-    with st.sidebar:
-        st.markdown("### 대표자 관리")
-        st.caption(ADMIN_ID)
-        page = st.radio("관리 메뉴", ["전체 주문 관리", "가격 설정", "회원 연락처", "계정 설정"])
-        st.divider()
+    identity, logout_column = st.columns([4, 1])
+    with identity:
+        st.markdown(
+            f'<div class="soft-card"><b>대표자 관리</b><br>'
+            f'<span class="muted">로그인 계정: {html.escape(ADMIN_ID)}</span></div>',
+            unsafe_allow_html=True,
+        )
+    with logout_column:
         if st.button("로그아웃", use_container_width=True):
             logout()
+    page = st.radio(
+        "대표자 메뉴",
+        ["전체 주문 관리", "가격 설정", "회원 연락처", "계정 설정"],
+        horizontal=True,
+        key="admin_top_menu",
+    )
+    st.divider()
     return page
 
 
