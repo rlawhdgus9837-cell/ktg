@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import json
 import math
 import os
 import re
@@ -23,7 +24,7 @@ import streamlit.components.v1 as components
 # -----------------------------------------------------------------------------
 # 기본 설정
 # -----------------------------------------------------------------------------
-APP_TITLE = "KTG 온라인 가공 견적"
+APP_TITLE = "KTG 가공 견적 프로그램"
 KOREA_TZ = ZoneInfo("Asia/Seoul")
 
 # Streamlit Community Cloud의 Secrets에 반드시 등록해야 합니다.
@@ -465,7 +466,7 @@ def inject_global_style() -> None:
         html, body, .stApp, [data-testid="stAppViewContainer"],
         [data-testid="stMain"], [data-testid="stMainBlockContainer"] {
             background: #f5f7fa !important;
-            color: #172033 !important;
+            color: #293548 !important;
             color-scheme: light !important;
         }
         .stApp p, .stApp label, .stApp small,
@@ -479,14 +480,14 @@ def inject_global_style() -> None:
         [data-testid="stSidebar"] p,
         [data-testid="stSidebar"] label,
         [data-testid="stSidebar"] span {
-            color: #172033 !important;
-            -webkit-text-fill-color: #172033 !important;
+            color: #293548 !important;
+            -webkit-text-fill-color: #293548 !important;
         }
         .stApp input, .stApp textarea {
             background: #ffffff !important;
-            color: #172033 !important;
-            -webkit-text-fill-color: #172033 !important;
-            caret-color: #172033 !important;
+            color: #293548 !important;
+            -webkit-text-fill-color: #293548 !important;
+            caret-color: #293548 !important;
         }
         .stApp input::placeholder, .stApp textarea::placeholder {
             color: #7b8797 !important;
@@ -497,27 +498,28 @@ def inject_global_style() -> None:
         .stApp [data-baseweb="base-input"],
         .stApp [data-baseweb="input"] {
             background: #ffffff !important;
-            color: #172033 !important;
+            color: #293548 !important;
         }
         .stApp [data-baseweb="select"] span,
         .stApp [data-baseweb="select"] div {
-            color: #172033 !important;
-            -webkit-text-fill-color: #172033 !important;
+            color: #293548 !important;
+            -webkit-text-fill-color: #293548 !important;
         }
         [data-testid="stHeader"], [data-testid="stToolbar"], #MainMenu, footer { display: none !important; }
         [data-testid="stHeaderActionElements"], a.anchor-link,
         h1 > a, h2 > a, h3 > a, h4 > a, h5 > a, h6 > a { display: none !important; }
         a { text-decoration: none !important; }
         .block-container { max-width: 1180px; padding-top: 2rem; padding-bottom: 4rem; }
-        .app-title { font-size: 1.72rem; font-weight: 800; letter-spacing: -0.04em; color: #15243c; }
+        .app-title { font-size: 1.9rem; font-weight: 800; letter-spacing: -0.04em; color: #38556f; }
+        .app-title.centered { text-align: center; margin: .35rem 0 1rem; }
         .app-subtitle { color: #64748b; margin-top: .25rem; margin-bottom: 1.35rem; }
-        .section-title { font-size: 1.22rem; font-weight: 750; color: #172033; margin: .2rem 0 1rem; }
+        .section-title { font-size: 1.22rem; font-weight: 750; color: #293548; margin: .2rem 0 1rem; }
         .top-bar {
             display: flex; align-items: center; justify-content: space-between; gap: 1rem;
             padding: .8rem 1rem; margin-bottom: 1rem; background: #ffffff;
             border: 1px solid #e2e8f0; border-radius: 12px;
         }
-        .top-bar strong { color: #17355f; }
+        .top-bar strong { color: #557a95; }
         .process-grid {
             display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .7rem;
             margin: .25rem 0 1.4rem;
@@ -526,43 +528,62 @@ def inject_global_style() -> None:
             background: #ffffff; border: 1px solid #e2e8f0; border-radius: 11px;
             padding: .8rem .9rem; color: #435268; font-size: .9rem;
         }
-        .process-item b { display: block; color: #17355f; margin-bottom: .2rem; }
+        .process-item b { display: block; color: #557a95; margin-bottom: .2rem; }
         .soft-card {
             background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px;
             padding: 1.05rem 1.15rem; box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
         }
         .notice-card {
-            background: #eef5ff; border: 1px solid #cbdcf7; border-radius: 12px;
-            padding: .9rem 1rem; color: #29476f;
+            background: #f1f7ff; border: 1px solid #cfe2f7; border-radius: 12px;
+            padding: .9rem 1rem; color: #34516f;
         }
         .muted { color: #64748b; font-size: .92rem; }
-        .preview-title { font-size: 1.05rem; font-weight: 750; color: #172033; margin-bottom: .15rem; }
+        .preview-title { font-size: 1.05rem; font-weight: 750; color: #293548; margin-bottom: .15rem; }
         .estimate-note {
             background: #fff; border: 1px solid #e2e8f0; border-radius: 11px;
             padding: .85rem 1rem; color: #566579; font-size: .88rem; margin-top: .7rem;
         }
         .auth-gate {
-            background: #f0f6ff; border: 1px solid #c8daf3; border-radius: 14px;
+            background: #f3f8ff; border: 1px solid #cfe2f7; border-radius: 14px;
             padding: 1rem 1.1rem; margin: 1rem 0;
         }
-        .money { font-size: 1.45rem; font-weight: 800; color: #17355f; }
+        .money { font-size: 1.45rem; font-weight: 800; color: #557a95; }
         .status-row { display: flex; flex-wrap: wrap; gap: 7px; margin: .55rem 0 .25rem; }
         .status-step {
             padding: 5px 9px; border-radius: 999px; border: 1px solid #dbe3ed;
             background: #f8fafc; color: #8793a5; font-size: .78rem;
         }
-        .status-step.done { background: #e8f0fb; border-color: #adc5e6; color: #214d82; }
-        .status-step.current { background: #17355f; border-color: #17355f; color: #fff; font-weight: 700; }
+        .status-step.done { background: #eef4f7; border-color: #c6d7e2; color: #557a95; }
+        .status-step.current { background: #557a95; border-color: #557a95; color: #fff; font-weight: 700; }
         .stButton > button, .stDownloadButton > button {
             border-radius: 9px; min-height: 2.75rem; font-weight: 700;
-            border: 1px solid #23466f; background: #23466f; color: #fff !important;
+            border: 1px solid #557a95; background: #557a95; color: #fff !important;
             -webkit-text-fill-color: #fff !important;
         }
-        .stButton > button *, .stDownloadButton > button * {
+        .stButton > button *, .stButton > button p, .stButton > button span,
+        .stDownloadButton > button *, .stDownloadButton > button p, .stDownloadButton > button span {
             color: #fff !important; -webkit-text-fill-color: #fff !important;
         }
         .stButton > button:hover, .stDownloadButton > button:hover {
-            border-color: #17355f; background: #17355f; color: #fff;
+            border-color: #466a84; background: #466a84; color: #fff;
+        }
+        [data-testid="stButton"] button,
+        [data-testid="stFormSubmitButton"] button,
+        [data-testid="stDownloadButton"] button {
+            border-color: #557a95 !important; background: #557a95 !important;
+        }
+        [data-testid="stButton"] button p,
+        [data-testid="stButton"] button span,
+        [data-testid="stFormSubmitButton"] button p,
+        [data-testid="stFormSubmitButton"] button span,
+        [data-testid="stDownloadButton"] button p,
+        [data-testid="stDownloadButton"] button span {
+            color: #ffffff !important; -webkit-text-fill-color: #ffffff !important;
+        }
+        [data-testid="stButton"] button:hover,
+        [data-testid="stFormSubmitButton"] button:hover,
+        [data-testid="stDownloadButton"] button:hover {
+            border-color: #466a84 !important; background: #466a84 !important;
         }
         [data-testid="stForm"] { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; }
         [data-testid="stMetric"] { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: .8rem 1rem; }
@@ -570,7 +591,7 @@ def inject_global_style() -> None:
         [data-testid="stSidebar"] { background: #eef2f6 !important; border-right: 1px solid #dce3eb; }
         [data-testid="stFileUploaderDropzone"] { background: #f8fafc !important; border: 1px dashed #aab7c7; }
         [data-testid="stFileUploaderDropzone"] * {
-            color: #172033 !important; -webkit-text-fill-color: #172033 !important;
+            color: #293548 !important; -webkit-text-fill-color: #293548 !important;
         }
         @media (max-width: 768px) {
             .block-container { padding: 1rem .85rem 3rem !important; }
@@ -617,12 +638,17 @@ def inject_global_style() -> None:
     )
 
 
-def app_header(description: str) -> None:
-    st.markdown(f'<div class="app-title">{APP_TITLE}</div>', unsafe_allow_html=True)
+def app_header(description: str = "", centered: bool = False) -> None:
+    title_class = "app-title centered" if centered else "app-title"
     st.markdown(
-        f'<div class="app-subtitle">{html.escape(description)}</div>',
+        f'<div class="{title_class}">{html.escape(APP_TITLE)}</div>',
         unsafe_allow_html=True,
     )
+    if description:
+        st.markdown(
+            f'<div class="app-subtitle">{html.escape(description)}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def initialize_session() -> None:
@@ -634,6 +660,8 @@ def initialize_session() -> None:
         "flash": "",
         "pending_order": None,
         "show_order_auth": False,
+        "auth_alert": "",
+        "auth_alert_nonce": 0,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -649,6 +677,8 @@ def logout() -> None:
         "flash",
         "pending_order",
         "show_order_auth",
+        "auth_alert",
+        "auth_alert_nonce",
     ]:
         if key in st.session_state:
             del st.session_state[key]
@@ -682,6 +712,10 @@ def submit_or_request_login(values: dict[str, Any]) -> None:
     if not st.session_state.logged_in:
         st.session_state.pending_order = values
         st.session_state.show_order_auth = True
+        st.session_state.auth_alert = (
+            "주문 요청은 로그인 후 접수할 수 있습니다. 아래에서 로그인하거나 회원가입해 주세요."
+        )
+        st.session_state.auth_alert_nonce += 1
         st.rerun()
     if st.session_state.role != "customer":
         st.warning("대표 계정에서는 주문을 접수할 수 없습니다. 고객 계정으로 로그인해 주세요.")
@@ -732,9 +766,26 @@ def dimension_line(
 ) -> str:
     return (
         f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-        'stroke="#3f5268" stroke-width="1.4" marker-start="url(#dimStart)" marker-end="url(#dimEnd)"/>'
+        'stroke="#60758d" stroke-width="1.4" marker-start="url(#dimStart)" marker-end="url(#dimEnd)"/>'
         f'<text x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="{anchor}" '
-        f'font-size="13" font-weight="700" fill="#24364b">{html.escape(label)}</text>'
+        f'font-size="12" font-weight="700" fill="#334155">{html.escape(label)}</text>'
+    )
+
+
+def vertical_dimension_line(
+    x: float,
+    y1: float,
+    y2: float,
+    label: str,
+    label_x: float,
+) -> str:
+    middle_y = (y1 + y2) / 2
+    return (
+        f'<line x1="{x:.1f}" y1="{y1:.1f}" x2="{x:.1f}" y2="{y2:.1f}" '
+        'stroke="#60758d" stroke-width="1.4" marker-start="url(#dimStart)" marker-end="url(#dimEnd)"/>'
+        f'<text x="{label_x:.1f}" y="{middle_y:.1f}" text-anchor="middle" '
+        f'transform="rotate(-90 {label_x:.1f} {middle_y:.1f})" '
+        f'font-size="12" font-weight="700" fill="#334155">{html.escape(label)}</text>'
     )
 
 
@@ -742,10 +793,10 @@ def draw_milling_svg(width: float, length: float, thickness: float, holes: int) 
     width = max(float(width), 0.1)
     length = max(float(length), 0.1)
     thickness = max(float(thickness), 0.1)
-    scale = min(260 / width, 210 / length, 105 / thickness)
+    scale = min(220 / width, 180 / length, 80 / thickness)
     sw, sl, stt = width * scale, length * scale, thickness * scale
-    top_x, top_y = 45 + (280 - sw) / 2, 70 + (220 - sl) / 2
-    side_x, side_y = 395 + (280 - sw) / 2, 120 + (120 - stt) / 2
+    top_x, top_y = 90 + (220 - sw) / 2, 90 + (180 - sl) / 2
+    side_x, side_y = 455 + (220 - sw) / 2, 135 + (80 - stt) / 2
 
     circles = []
     holes = max(0, int(holes))
@@ -758,29 +809,29 @@ def draw_milling_svg(width: float, length: float, thickness: float, holes: int) 
             cx = top_x + sw * (col + 1) / (cols + 1)
             cy = top_y + sl * (row + 1) / (rows + 1)
             circles.append(
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.1f}" fill="#fff" stroke="#17355f" stroke-width="1.5"/>'
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.1f}" fill="#fff" stroke="#4f8ed8" stroke-width="1.5"/>'
             )
 
     svg = f"""
-    <svg viewBox="0 0 720 390" width="100%" role="img" aria-label="밀링 규격 도면">
+    <svg viewBox="0 0 720 390" style="width:100%;height:auto;display:block;overflow:hidden" role="img" aria-label="밀링 규격 도면">
       <defs>
         <pattern id="millingHatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="9" stroke="#9fb9d5" stroke-width="3"/>
+          <line x1="0" y1="0" x2="0" y2="9" stroke="#b6d2ee" stroke-width="3"/>
         </pattern>
-        <marker id="dimStart" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto"><path d="M7,0 L0,3.5 L7,7" fill="#3f5268"/></marker>
-        <marker id="dimEnd" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="#3f5268"/></marker>
+        <marker id="dimStart" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto"><path d="M7,0 L0,3.5 L7,7" fill="#60758d"/></marker>
+        <marker id="dimEnd" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="#60758d"/></marker>
       </defs>
       <rect x="10" y="10" width="330" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
       <rect x="380" y="10" width="330" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
-      <text x="30" y="42" font-size="16" font-weight="700" fill="#172033">평면도</text>
-      <text x="400" y="42" font-size="16" font-weight="700" fill="#172033">측면도</text>
-      <rect x="{top_x:.1f}" y="{top_y:.1f}" width="{sw:.1f}" height="{sl:.1f}" fill="url(#millingHatch)" stroke="#1d5b88" stroke-width="2"/>
+      <text x="30" y="42" font-size="16" font-weight="700" fill="#334155">평면도</text>
+      <text x="400" y="42" font-size="16" font-weight="700" fill="#334155">측면도</text>
+      <rect x="{top_x:.1f}" y="{top_y:.1f}" width="{sw:.1f}" height="{sl:.1f}" fill="url(#millingHatch)" stroke="#4f8ed8" stroke-width="2"/>
       {''.join(circles)}
-      {dimension_line(top_x, top_y - 18, top_x + sw, top_y - 18, f'가로 W {width:g} mm', top_x + sw / 2, top_y - 27)}
-      {dimension_line(top_x - 18, top_y, top_x - 18, top_y + sl, f'세로 L {length:g} mm', top_x - 25, top_y + sl / 2, 'end')}
-      <rect x="{side_x:.1f}" y="{side_y:.1f}" width="{sw:.1f}" height="{stt:.1f}" fill="url(#millingHatch)" stroke="#1d5b88" stroke-width="2"/>
-      {dimension_line(side_x, side_y - 18, side_x + sw, side_y - 18, f'가로 W {width:g} mm', side_x + sw / 2, side_y - 27)}
-      {dimension_line(side_x - 18, side_y, side_x - 18, side_y + stt, f'두께 T {thickness:g} mm', side_x - 25, side_y + stt / 2, 'end')}
+      {dimension_line(top_x, 72, top_x + sw, 72, f'가로 W {width:g} mm', top_x + sw / 2, 61)}
+      {vertical_dimension_line(68, top_y, top_y + sl, f'세로 L {length:g} mm', 45)}
+      <rect x="{side_x:.1f}" y="{side_y:.1f}" width="{sw:.1f}" height="{stt:.1f}" fill="url(#millingHatch)" stroke="#4f8ed8" stroke-width="2"/>
+      {dimension_line(side_x, 112, side_x + sw, 112, f'가로 W {width:g} mm', side_x + sw / 2, 100)}
+      {vertical_dimension_line(432, side_y, side_y + stt, f'높이 T {thickness:g} mm', 409)}
       <text x="175" y="340" text-anchor="middle" font-size="13" fill="#64748b">가로 × 세로</text>
       <text x="545" y="340" text-anchor="middle" font-size="13" fill="#64748b">가로 × 두께</text>
     </svg>
@@ -791,29 +842,29 @@ def draw_milling_svg(width: float, length: float, thickness: float, holes: int) 
 def draw_lathe_svg(diameter: float, length: float) -> str:
     diameter = max(float(diameter), 0.1)
     length = max(float(length), 0.1)
-    scale = min(370 / length, 210 / diameter, 175 / diameter)
+    scale = min(300 / length, 160 / diameter)
     sl, sd = length * scale, diameter * scale
-    body_x, body_y = 35 + (400 - sl) / 2, 83 + (220 - sd) / 2
+    body_x, body_y = 85 + (300 - sl) / 2, 100 + (160 - sd) / 2
     circle_r = sd / 2
-    circle_x, circle_y = 575, 193
+    circle_x, circle_y = 590, 190
     svg = f"""
-    <svg viewBox="0 0 720 390" width="100%" role="img" aria-label="선반 규격 도면">
+    <svg viewBox="0 0 720 390" style="width:100%;height:auto;display:block;overflow:hidden" role="img" aria-label="선반 규격 도면">
       <defs>
         <pattern id="latheHatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="9" stroke="#9fb9d5" stroke-width="3"/>
+          <line x1="0" y1="0" x2="0" y2="9" stroke="#b6d2ee" stroke-width="3"/>
         </pattern>
-        <marker id="dimStart" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto"><path d="M7,0 L0,3.5 L7,7" fill="#3f5268"/></marker>
-        <marker id="dimEnd" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="#3f5268"/></marker>
+        <marker id="dimStart" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto"><path d="M7,0 L0,3.5 L7,7" fill="#60758d"/></marker>
+        <marker id="dimEnd" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="#60758d"/></marker>
       </defs>
       <rect x="10" y="10" width="440" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
       <rect x="470" y="10" width="240" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
-      <text x="30" y="42" font-size="16" font-weight="700" fill="#172033">측면도</text>
-      <text x="490" y="42" font-size="16" font-weight="700" fill="#172033">정면도</text>
-      <rect x="{body_x:.1f}" y="{body_y:.1f}" width="{sl:.1f}" height="{sd:.1f}" fill="url(#latheHatch)" stroke="#1d5b88" stroke-width="2"/>
+      <text x="30" y="42" font-size="16" font-weight="700" fill="#334155">측면도</text>
+      <text x="490" y="42" font-size="16" font-weight="700" fill="#334155">정면도</text>
+      <rect x="{body_x:.1f}" y="{body_y:.1f}" width="{sl:.1f}" height="{sd:.1f}" fill="url(#latheHatch)" stroke="#4f8ed8" stroke-width="2"/>
       <line x1="{body_x - 12:.1f}" y1="{body_y + sd/2:.1f}" x2="{body_x + sl + 12:.1f}" y2="{body_y + sd/2:.1f}" stroke="#75869a" stroke-dasharray="7 5"/>
-      {dimension_line(body_x, body_y - 20, body_x + sl, body_y - 20, f'길이 L {length:g} mm', body_x + sl / 2, body_y - 29)}
-      {dimension_line(body_x - 20, body_y, body_x - 20, body_y + sd, f'지름 D {diameter:g} mm', body_x - 27, body_y + sd / 2, 'end')}
-      <circle cx="{circle_x}" cy="{circle_y}" r="{circle_r:.1f}" fill="url(#latheHatch)" stroke="#1d5b88" stroke-width="2"/>
+      {dimension_line(body_x, 76, body_x + sl, 76, f'길이 L {length:g} mm', body_x + sl / 2, 64)}
+      {vertical_dimension_line(62, body_y, body_y + sd, f'지름 D {diameter:g} mm', 39)}
+      <circle cx="{circle_x}" cy="{circle_y}" r="{circle_r:.1f}" fill="url(#latheHatch)" stroke="#4f8ed8" stroke-width="2"/>
       <line x1="{circle_x - circle_r - 8:.1f}" y1="{circle_y}" x2="{circle_x + circle_r + 8:.1f}" y2="{circle_y}" stroke="#75869a" stroke-dasharray="7 5"/>
       {dimension_line(circle_x - circle_r, circle_y + circle_r + 24, circle_x + circle_r, circle_y + circle_r + 24, f'지름 D {diameter:g} mm', circle_x, circle_y + circle_r + 43)}
       <text x="230" y="340" text-anchor="middle" font-size="13" fill="#64748b">길이 × 지름</text>
@@ -825,9 +876,64 @@ def draw_lathe_svg(diameter: float, length: float) -> str:
 
 def show_svg(svg: str, height: int = 410) -> None:
     components.html(
-        f'<div style="font-family:Pretendard,Noto Sans KR,Malgun Gothic,sans-serif;">{svg}</div>',
+        '<div style="width:100%;font-family:Pretendard,Noto Sans KR,Malgun Gothic,sans-serif;">'
+        f"{svg}</div>",
         height=height,
         scrolling=False,
+    )
+
+
+def show_temporary_alert(message: str, nonce: int) -> None:
+    message_json = json.dumps(message, ensure_ascii=False)
+    components.html(
+        f"""
+        <script>
+        // alert-run-{nonce}
+        try {{
+          const d = window.parent.document;
+          const oldAlert = d.getElementById("ktg-temporary-alert");
+          if (oldAlert) oldAlert.remove();
+
+          const alertBox = d.createElement("div");
+          alertBox.id = "ktg-temporary-alert";
+          alertBox.textContent = {message_json};
+          Object.assign(alertBox.style, {{
+            position: "fixed",
+            left: "50%",
+            top: "24px",
+            transform: "translate(-50%, -14px)",
+            width: "calc(100% - 32px)",
+            maxWidth: "560px",
+            boxSizing: "border-box",
+            padding: "15px 18px",
+            borderRadius: "12px",
+            border: "1px solid #f3a9b2",
+            background: "#fff1f2",
+            color: "#9f2135",
+            fontFamily: "Pretendard, Noto Sans KR, Malgun Gothic, sans-serif",
+            fontSize: "15px",
+            fontWeight: "700",
+            lineHeight: "1.5",
+            textAlign: "center",
+            boxShadow: "0 12px 30px rgba(120, 33, 48, 0.20)",
+            opacity: "0",
+            transition: "opacity .22s ease, transform .22s ease",
+            zIndex: "999999"
+          }});
+          d.body.appendChild(alertBox);
+          requestAnimationFrame(() => {{
+            alertBox.style.opacity = "1";
+            alertBox.style.transform = "translate(-50%, 0)";
+          }});
+          window.setTimeout(() => {{
+            alertBox.style.opacity = "0";
+            alertBox.style.transform = "translate(-50%, -14px)";
+            window.setTimeout(() => alertBox.remove(), 250);
+          }}, 3200);
+        }} catch (e) {{}}
+        </script>
+        """,
+        height=0,
     )
 
 
@@ -837,14 +943,10 @@ def show_svg(svg: str, height: int = 410) -> None:
 def render_auth(embedded: bool = False) -> None:
     has_pending_order = bool(st.session_state.get("pending_order"))
     if embedded:
-        if has_pending_order:
-            message = (
-                '<b>주문 접수에는 로그인이 필요합니다.</b><br>'
-                '입력한 견적 내용은 그대로 보관됩니다. 로그인하거나 회원가입하면 주문 요청이 바로 접수됩니다.'
-            )
-        else:
-            message = '<b>계정으로 로그인하세요.</b><br>주문 내역과 대표자의 견적 답변을 계속 확인할 수 있습니다.'
-        st.markdown(f'<div class="auth-gate">{message}</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="section-title">로그인 또는 회원가입</div>',
+            unsafe_allow_html=True,
+        )
     else:
         app_header("로그인하면 주문 내역과 대표 답변을 계속 확인할 수 있습니다.")
 
@@ -952,25 +1054,26 @@ def require_customer_phone() -> bool:
 
 
 def render_public_home() -> None:
-    app_header("치수와 재료를 선택하면 예상 가공비를 바로 확인할 수 있습니다.")
-    top_left, top_right = st.columns([3.2, 1])
-    with top_left:
-        st.markdown(
-            '<div class="top-bar"><div><strong>로그인 없이 견적을 확인하세요.</strong><br>'
-            '<span class="muted">주문 접수와 진행 내역 확인 단계에서만 로그인이 필요합니다.</span></div></div>',
-            unsafe_allow_html=True,
+    if st.session_state.get("auth_alert"):
+        show_temporary_alert(
+            st.session_state.auth_alert,
+            int(st.session_state.get("auth_alert_nonce", 0)),
         )
+        st.session_state.auth_alert = ""
+    app_header(centered=True)
+    _, top_right = st.columns([4, 1])
     with top_right:
         if st.button("로그인 / 회원가입", use_container_width=True):
             st.session_state.show_order_auth = True
+            st.session_state.auth_alert = ""
             st.rerun()
     st.markdown(
         """
         <div class="process-grid">
-          <div class="process-item"><b>1. 가공 방식</b>밀링, 선반, 도면 검토 중 선택</div>
-          <div class="process-item"><b>2. 규격 입력</b>치수, 재료, 수량 입력</div>
-          <div class="process-item"><b>3. 예상 견적</b>형상과 예상 금액 확인</div>
-          <div class="process-item"><b>4. 주문 접수</b>로그인 후 검토 요청</div>
+          <div class="process-item"><b>1. 가공 방식 선택</b>밀링, 선반, 도면 검토 중에서 선택합니다.</div>
+          <div class="process-item"><b>2. 규격 입력</b>재료와 치수, 주문 수량을 입력합니다.</div>
+          <div class="process-item"><b>3. 예상 견적 확인</b>도형과 예상 금액을 바로 확인합니다.</div>
+          <div class="process-item"><b>4. 주문 요청</b>로그인 후 검토 요청을 접수합니다.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1012,7 +1115,7 @@ def render_milling_order() -> None:
         width = st.number_input("가로 W (mm)", min_value=0.1, value=100.0, step=1.0)
     with c2:
         length = st.number_input("세로 L (mm)", min_value=0.1, value=150.0, step=1.0)
-        thickness = st.number_input("두께 T (mm)", min_value=0.1, value=10.0, step=1.0)
+        thickness = st.number_input("높이(두께) T (mm)", min_value=0.1, value=10.0, step=1.0)
     with c3:
         holes = st.number_input("홀 수량 (개)", min_value=0, value=0, step=1)
         quantity = st.number_input("주문 수량 (개)", min_value=1, value=1, step=1)
@@ -1295,16 +1398,16 @@ def render_admin_pricing() -> None:
         st.markdown('<div class="section-title">밀링 가공 기준</div>', unsafe_allow_html=True)
         m1, m2, m3, m4 = st.columns(4)
         milling_base = m1.number_input("기본 가공비 (원)", min_value=0.0, value=current["milling_base"], step=1_000.0, key="price_milling_base")
-        milling_width = m2.number_input("가로 1mm당 (원)", min_value=0.0, value=current["milling_width"], step=5.0, key="price_milling_width")
-        milling_length = m3.number_input("세로 1mm당 (원)", min_value=0.0, value=current["milling_length"], step=5.0, key="price_milling_length")
-        milling_thickness = m4.number_input("두께 1mm당 (원)", min_value=0.0, value=current["milling_thickness"], step=10.0, key="price_milling_thickness")
+        milling_width = m2.number_input("가로 1mm당 가격 (원)", min_value=0.0, value=current["milling_width"], step=5.0, key="price_milling_width")
+        milling_length = m3.number_input("세로(길이) 1mm당 가격 (원)", min_value=0.0, value=current["milling_length"], step=5.0, key="price_milling_length")
+        milling_thickness = m4.number_input("높이(두께) 1mm당 가격 (원)", min_value=0.0, value=current["milling_thickness"], step=10.0, key="price_milling_thickness")
 
         st.markdown('<div class="section-title">선반 가공 기준</div>', unsafe_allow_html=True)
         l1, l2, l3, l4 = st.columns(4)
         lathe_base = l1.number_input("기본 가공비 (원)", min_value=0.0, value=current["lathe_base"], step=1_000.0, key="price_lathe_base")
-        lathe_diameter = l2.number_input("지름 1mm당 (원)", min_value=0.0, value=current["lathe_diameter"], step=5.0, key="price_lathe_diameter")
-        lathe_length = l3.number_input("길이 1mm당 (원)", min_value=0.0, value=current["lathe_length"], step=5.0, key="price_lathe_length")
-        hole_each = l4.number_input("홀 1개당 (원)", min_value=0.0, value=current["hole_each"], step=100.0, key="price_hole_each")
+        lathe_diameter = l2.number_input("지름 1mm당 가격 (원)", min_value=0.0, value=current["lathe_diameter"], step=5.0, key="price_lathe_diameter")
+        lathe_length = l3.number_input("길이 1mm당 가격 (원)", min_value=0.0, value=current["lathe_length"], step=5.0, key="price_lathe_length")
+        hole_each = l4.number_input("홀 1개당 가격 (원)", min_value=0.0, value=current["hole_each"], step=100.0, key="price_hole_each")
 
         st.markdown('<div class="section-title">재료 기준 단가</div>', unsafe_allow_html=True)
         material_values: dict[str, float] = {}
