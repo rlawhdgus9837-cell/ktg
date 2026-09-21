@@ -18,8 +18,8 @@ import app as core
 
 
 DEMO_DB = Path(__file__).resolve().with_name("ktg_demo.db")
-DEMO_ADMIN_ID = os.getenv("KTG_ADMIN_ID", "ktg_demo_admin").strip() or "ktg_demo_admin"
-DEMO_ADMIN_PASSWORD = os.getenv("KTG_ADMIN_PASSWORD", "KTGdemo!2026")
+DEMO_ADMIN_ID = os.getenv("KTG_ADMIN_ID", "대표").strip() or "대표"
+DEMO_ADMIN_PASSWORD = os.getenv("KTG_ADMIN_PASSWORD", "1234")
 
 
 class SQLiteCompatConnection:
@@ -103,6 +103,32 @@ def init_demo_db() -> bool:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pricing_settings (
+                setting_key TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                value REAL NOT NULL,
+                unit TEXT NOT NULL,
+                updated_at TEXT DEFAULT ''
+            )
+            """
+        )
+        for setting_key, setting in core.PRICING_DEFAULTS.items():
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO pricing_settings
+                    (setting_key, label, value, unit, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    setting_key,
+                    setting["label"],
+                    setting["value"],
+                    setting["unit"],
+                    core.now_text(),
+                ),
+            )
         existing = conn.execute(
             "SELECT username FROM users WHERE username=?", (DEMO_ADMIN_ID,)
         ).fetchone()

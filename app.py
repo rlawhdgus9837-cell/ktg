@@ -23,7 +23,7 @@ import streamlit.components.v1 as components
 # -----------------------------------------------------------------------------
 # 기본 설정
 # -----------------------------------------------------------------------------
-APP_TITLE = "KTG 가공 발주 시스템"
+APP_TITLE = "KTG 온라인 가공 견적"
 KOREA_TZ = ZoneInfo("Asia/Seoul")
 
 # Streamlit Community Cloud의 Secrets에 반드시 등록해야 합니다.
@@ -33,11 +33,28 @@ ADMIN_ID = os.getenv("KTG_ADMIN_ID", "").strip()
 ADMIN_PASSWORD = os.getenv("KTG_ADMIN_PASSWORD", "")
 
 MATERIALS = {
-    "알루미늄 6061": {"density": 2.70, "default_price": 5_000},
-    "스틸 SS400": {"density": 7.85, "default_price": 2_000},
-    "스테인리스 304": {"density": 7.93, "default_price": 5_000},
-    "스테인리스 316": {"density": 7.98, "default_price": 6_000},
-    "황동": {"density": 8.50, "default_price": 9_000},
+    "알루미늄 6061": {"density": 2.70, "price_key": "material_aluminum_6061"},
+    "스틸 SS400": {"density": 7.85, "price_key": "material_steel_ss400"},
+    "스테인리스 304": {"density": 7.93, "price_key": "material_stainless_304"},
+    "스테인리스 316": {"density": 7.98, "price_key": "material_stainless_316"},
+    "황동": {"density": 8.50, "price_key": "material_brass"},
+}
+
+# 대표 관리자가 화면에서 바꿀 수 있는 예상 견적 기준값입니다.
+PRICING_DEFAULTS = {
+    "milling_base": {"label": "밀링 기본 가공비", "value": 15_000.0, "unit": "원/주문"},
+    "milling_width": {"label": "밀링 가로 단가", "value": 35.0, "unit": "원/mm"},
+    "milling_length": {"label": "밀링 세로 단가", "value": 35.0, "unit": "원/mm"},
+    "milling_thickness": {"label": "밀링 두께 단가", "value": 120.0, "unit": "원/mm"},
+    "lathe_base": {"label": "선반 기본 가공비", "value": 15_000.0, "unit": "원/주문"},
+    "lathe_diameter": {"label": "선반 지름 단가", "value": 90.0, "unit": "원/mm"},
+    "lathe_length": {"label": "선반 길이 단가", "value": 45.0, "unit": "원/mm"},
+    "hole_each": {"label": "홀 가공 단가", "value": 1_000.0, "unit": "원/개"},
+    "material_aluminum_6061": {"label": "알루미늄 6061 재료 단가", "value": 5_000.0, "unit": "원/kg"},
+    "material_steel_ss400": {"label": "스틸 SS400 재료 단가", "value": 2_000.0, "unit": "원/kg"},
+    "material_stainless_304": {"label": "스테인리스 304 재료 단가", "value": 5_000.0, "unit": "원/kg"},
+    "material_stainless_316": {"label": "스테인리스 316 재료 단가", "value": 6_000.0, "unit": "원/kg"},
+    "material_brass": {"label": "황동 재료 단가", "value": 9_000.0, "unit": "원/kg"},
 }
 
 ORDER_STATUSES = [
@@ -190,6 +207,34 @@ def init_db() -> bool:
         conn.execute("UPDATE orders SET status='접수' WHERE status IS NULL OR status='' ")
         conn.execute("UPDATE orders SET admin_reply='' WHERE admin_reply IS NULL")
         conn.execute("UPDATE orders SET request_note='' WHERE request_note IS NULL")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pricing_settings (
+                setting_key TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                value REAL NOT NULL,
+                unit TEXT NOT NULL,
+                updated_at TEXT DEFAULT ''
+            )
+            """
+        )
+        for setting_key, setting in PRICING_DEFAULTS.items():
+            conn.execute(
+                """
+                INSERT INTO pricing_settings
+                    (setting_key, label, value, unit, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (setting_key) DO NOTHING
+                """,
+                (
+                    setting_key,
+                    setting["label"],
+                    setting["value"],
+                    setting["unit"],
+                    now_text(),
+                ),
+            )
 
         conn.execute(
             """
@@ -366,6 +411,36 @@ def update_order_by_admin(
         )
 
 
+def get_pricing_settings() -> dict[str, float]:
+    values = {
+        setting_key: float(setting["value"])
+        for setting_key, setting in PRICING_DEFAULTS.items()
+    }
+    with db_connection() as conn:
+        rows = conn.execute(
+            "SELECT setting_key, value FROM pricing_settings"
+        ).fetchall()
+    for row in rows:
+        if row["setting_key"] in values:
+            values[row["setting_key"]] = float(row["value"])
+    return values
+
+
+def save_pricing_settings(values: dict[str, float]) -> None:
+    with db_connection() as conn:
+        for setting_key, value in values.items():
+            if setting_key not in PRICING_DEFAULTS:
+                continue
+            conn.execute(
+                """
+                UPDATE pricing_settings
+                SET value=%s, updated_at=%s
+                WHERE setting_key=%s
+                """,
+                (max(0.0, float(value)), now_text(), setting_key),
+            )
+
+
 def process_machining(machine_type: str, material: str, operation_time: float) -> str:
     """이전 app.py에서 사용하던 함수와의 호환을 위한 처리 함수입니다."""
     if machine_type in {"Milling (밀링)", "MCT(밀링)"}:
@@ -437,6 +512,21 @@ def inject_global_style() -> None:
         .app-title { font-size: 1.72rem; font-weight: 800; letter-spacing: -0.04em; color: #15243c; }
         .app-subtitle { color: #64748b; margin-top: .25rem; margin-bottom: 1.35rem; }
         .section-title { font-size: 1.22rem; font-weight: 750; color: #172033; margin: .2rem 0 1rem; }
+        .top-bar {
+            display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+            padding: .8rem 1rem; margin-bottom: 1rem; background: #ffffff;
+            border: 1px solid #e2e8f0; border-radius: 12px;
+        }
+        .top-bar strong { color: #17355f; }
+        .process-grid {
+            display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .7rem;
+            margin: .25rem 0 1.4rem;
+        }
+        .process-item {
+            background: #ffffff; border: 1px solid #e2e8f0; border-radius: 11px;
+            padding: .8rem .9rem; color: #435268; font-size: .9rem;
+        }
+        .process-item b { display: block; color: #17355f; margin-bottom: .2rem; }
         .soft-card {
             background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px;
             padding: 1.05rem 1.15rem; box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
@@ -446,6 +536,15 @@ def inject_global_style() -> None:
             padding: .9rem 1rem; color: #29476f;
         }
         .muted { color: #64748b; font-size: .92rem; }
+        .preview-title { font-size: 1.05rem; font-weight: 750; color: #172033; margin-bottom: .15rem; }
+        .estimate-note {
+            background: #fff; border: 1px solid #e2e8f0; border-radius: 11px;
+            padding: .85rem 1rem; color: #566579; font-size: .88rem; margin-top: .7rem;
+        }
+        .auth-gate {
+            background: #f0f6ff; border: 1px solid #c8daf3; border-radius: 14px;
+            padding: 1rem 1.1rem; margin: 1rem 0;
+        }
         .money { font-size: 1.45rem; font-weight: 800; color: #17355f; }
         .status-row { display: flex; flex-wrap: wrap; gap: 7px; margin: .55rem 0 .25rem; }
         .status-step {
@@ -477,6 +576,11 @@ def inject_global_style() -> None:
             .block-container { padding: 1rem .85rem 3rem !important; }
             .app-title { font-size: 1.45rem; }
             .app-subtitle { font-size: .92rem; }
+            .process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .top-bar { align-items: flex-start; flex-direction: column; }
+            .stApp, .stApp p, .stApp label, .stApp span, .stApp div {
+                color-scheme: light !important;
+            }
         }
         </style>
         """,
@@ -499,6 +603,13 @@ def inject_global_style() -> None:
             d.head.appendChild(meta);
           }
           meta.content = "notranslate";
+          let detection = d.querySelector('meta[name="format-detection"]');
+          if (!detection) {
+            detection = d.createElement("meta");
+            detection.name = "format-detection";
+            d.head.appendChild(detection);
+          }
+          detection.content = "telephone=no,email=no,address=no";
         } catch (e) {}
         </script>
         """,
@@ -521,6 +632,8 @@ def initialize_session() -> None:
         "role": "",
         "phone": "",
         "flash": "",
+        "pending_order": None,
+        "show_order_auth": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -528,10 +641,58 @@ def initialize_session() -> None:
 
 
 def logout() -> None:
-    for key in ["logged_in", "username", "role", "phone", "flash"]:
+    for key in [
+        "logged_in",
+        "username",
+        "role",
+        "phone",
+        "flash",
+        "pending_order",
+        "show_order_auth",
+    ]:
         if key in st.session_state:
             del st.session_state[key]
     st.rerun()
+
+
+def set_login_session(user: dict[str, Any]) -> None:
+    st.session_state.logged_in = True
+    st.session_state.username = user["username"]
+    st.session_state.role = user["role"] or "customer"
+    st.session_state.phone = user["phone"] or ""
+
+
+def complete_pending_order() -> int | None:
+    pending = st.session_state.get("pending_order")
+    if not pending or st.session_state.role != "customer":
+        return None
+    if not normalize_phone(st.session_state.phone):
+        st.session_state.flash = "주문 접수 전에 계정 설정에서 휴대폰 번호를 등록해 주세요."
+        return None
+    values = dict(pending)
+    values["username"] = st.session_state.username
+    order_id = create_order(values)
+    st.session_state.pending_order = None
+    st.session_state.show_order_auth = False
+    st.session_state.flash = f"주문 요청 #{order_id}번이 접수되었습니다. 내 주문 내역에서 확인할 수 있습니다."
+    return order_id
+
+
+def submit_or_request_login(values: dict[str, Any]) -> None:
+    if not st.session_state.logged_in:
+        st.session_state.pending_order = values
+        st.session_state.show_order_auth = True
+        st.rerun()
+    if st.session_state.role != "customer":
+        st.warning("대표 계정에서는 주문을 접수할 수 없습니다. 고객 계정으로 로그인해 주세요.")
+        return
+    if not require_customer_phone():
+        st.session_state.pending_order = values
+        return
+    values = dict(values)
+    values["username"] = st.session_state.username
+    order_id = create_order(values)
+    st.success(f"주문 요청 #{order_id}번이 접수되었습니다. 내 주문 내역에서 확인할 수 있습니다.")
 
 
 def category_text(category: str) -> str:
@@ -617,7 +778,7 @@ def draw_milling_svg(width: float, length: float, thickness: float, holes: int) 
       {''.join(circles)}
       {dimension_line(top_x, top_y - 18, top_x + sw, top_y - 18, f'가로 W {width:g} mm', top_x + sw / 2, top_y - 27)}
       {dimension_line(top_x - 18, top_y, top_x - 18, top_y + sl, f'세로 L {length:g} mm', top_x - 25, top_y + sl / 2, 'end')}
-      <rect x="{side_x:.1f}" y="{side_y:.1f}" width="{sw:.1f}" height="{stt:.1f}" fill="#b8c9da" stroke="#1d5b88" stroke-width="2"/>
+      <rect x="{side_x:.1f}" y="{side_y:.1f}" width="{sw:.1f}" height="{stt:.1f}" fill="url(#millingHatch)" stroke="#1d5b88" stroke-width="2"/>
       {dimension_line(side_x, side_y - 18, side_x + sw, side_y - 18, f'가로 W {width:g} mm', side_x + sw / 2, side_y - 27)}
       {dimension_line(side_x - 18, side_y, side_x - 18, side_y + stt, f'두께 T {thickness:g} mm', side_x - 25, side_y + stt / 2, 'end')}
       <text x="175" y="340" text-anchor="middle" font-size="13" fill="#64748b">가로 × 세로</text>
@@ -638,7 +799,9 @@ def draw_lathe_svg(diameter: float, length: float) -> str:
     svg = f"""
     <svg viewBox="0 0 720 390" width="100%" role="img" aria-label="선반 규격 도면">
       <defs>
-        <linearGradient id="latheMetal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9e4ee"/><stop offset=".5" stop-color="#9fb4c8"/><stop offset="1" stop-color="#d7e1ea"/></linearGradient>
+        <pattern id="latheHatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="9" stroke="#9fb9d5" stroke-width="3"/>
+        </pattern>
         <marker id="dimStart" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto"><path d="M7,0 L0,3.5 L7,7" fill="#3f5268"/></marker>
         <marker id="dimEnd" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="#3f5268"/></marker>
       </defs>
@@ -646,11 +809,11 @@ def draw_lathe_svg(diameter: float, length: float) -> str:
       <rect x="470" y="10" width="240" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
       <text x="30" y="42" font-size="16" font-weight="700" fill="#172033">측면도</text>
       <text x="490" y="42" font-size="16" font-weight="700" fill="#172033">정면도</text>
-      <rect x="{body_x:.1f}" y="{body_y:.1f}" width="{sl:.1f}" height="{sd:.1f}" fill="url(#latheMetal)" stroke="#1d5b88" stroke-width="2"/>
+      <rect x="{body_x:.1f}" y="{body_y:.1f}" width="{sl:.1f}" height="{sd:.1f}" fill="url(#latheHatch)" stroke="#1d5b88" stroke-width="2"/>
       <line x1="{body_x - 12:.1f}" y1="{body_y + sd/2:.1f}" x2="{body_x + sl + 12:.1f}" y2="{body_y + sd/2:.1f}" stroke="#75869a" stroke-dasharray="7 5"/>
       {dimension_line(body_x, body_y - 20, body_x + sl, body_y - 20, f'길이 L {length:g} mm', body_x + sl / 2, body_y - 29)}
       {dimension_line(body_x - 20, body_y, body_x - 20, body_y + sd, f'지름 D {diameter:g} mm', body_x - 27, body_y + sd / 2, 'end')}
-      <circle cx="{circle_x}" cy="{circle_y}" r="{circle_r:.1f}" fill="url(#latheMetal)" stroke="#1d5b88" stroke-width="2"/>
+      <circle cx="{circle_x}" cy="{circle_y}" r="{circle_r:.1f}" fill="url(#latheHatch)" stroke="#1d5b88" stroke-width="2"/>
       <line x1="{circle_x - circle_r - 8:.1f}" y1="{circle_y}" x2="{circle_x + circle_r + 8:.1f}" y2="{circle_y}" stroke="#75869a" stroke-dasharray="7 5"/>
       {dimension_line(circle_x - circle_r, circle_y + circle_r + 24, circle_x + circle_r, circle_y + circle_r + 24, f'지름 D {diameter:g} mm', circle_x, circle_y + circle_r + 43)}
       <text x="230" y="340" text-anchor="middle" font-size="13" fill="#64748b">길이 × 지름</text>
@@ -671,55 +834,90 @@ def show_svg(svg: str, height: int = 410) -> None:
 # -----------------------------------------------------------------------------
 # 로그인 / 회원가입
 # -----------------------------------------------------------------------------
-def render_auth() -> None:
-    app_header("회원가입 후 가공 신청과 진행 상황을 한곳에서 확인할 수 있습니다.")
+def render_auth(embedded: bool = False) -> None:
+    has_pending_order = bool(st.session_state.get("pending_order"))
+    if embedded:
+        if has_pending_order:
+            message = (
+                '<b>주문 접수에는 로그인이 필요합니다.</b><br>'
+                '입력한 견적 내용은 그대로 보관됩니다. 로그인하거나 회원가입하면 주문 요청이 바로 접수됩니다.'
+            )
+        else:
+            message = '<b>계정으로 로그인하세요.</b><br>주문 내역과 대표자의 견적 답변을 계속 확인할 수 있습니다.'
+        st.markdown(f'<div class="auth-gate">{message}</div>', unsafe_allow_html=True)
+    else:
+        app_header("로그인하면 주문 내역과 대표 답변을 계속 확인할 수 있습니다.")
+
     left, right = st.columns(2, gap="large")
+    form_suffix = "order" if embedded else "page"
 
     with left:
         st.markdown('<div class="section-title">로그인</div>', unsafe_allow_html=True)
-        with st.form("login_form", clear_on_submit=False):
-            login_id = st.text_input("아이디", key="login_id")
-            login_pw = st.text_input("비밀번호", type="password", key="login_pw")
+        with st.form(f"login_form_{form_suffix}", clear_on_submit=False):
+            login_id = st.text_input("아이디", key=f"login_id_{form_suffix}")
+            login_pw = st.text_input(
+                "비밀번호", type="password", key=f"login_pw_{form_suffix}"
+            )
             login_submitted = st.form_submit_button("로그인", use_container_width=True)
         if login_submitted:
             user = authenticate(login_id, login_pw)
             if user is None:
-                st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
+                st.error("아이디 또는 비밀번호를 다시 확인해 주세요.")
             else:
-                st.session_state.logged_in = True
-                st.session_state.username = user["username"]
-                st.session_state.role = user["role"] or "customer"
-                st.session_state.phone = user["phone"] or ""
+                set_login_session(user)
+                complete_pending_order()
                 st.rerun()
 
-        st.markdown(
-            '<div class="notice-card"><b>대표 계정</b><br>대표 아이디로 로그인하면 모든 회원의 발주, 연락처, 첨부 도면, 견적 답변과 진행 상태를 관리할 수 있습니다.</div>',
-            unsafe_allow_html=True,
-        )
+        if not embedded:
+            st.markdown(
+                '<div class="notice-card"><b>대표자 로그인</b><br>'
+                '대표 계정으로 로그인하면 전체 주문, 회원 연락처, 첨부 도면, 견적 답변과 가격 기준을 관리할 수 있습니다.</div>',
+                unsafe_allow_html=True,
+            )
 
     with right:
-        st.markdown('<div class="section-title">회원가입</div>', unsafe_allow_html=True)
-        with st.form("register_form", clear_on_submit=False):
+        st.markdown('<div class="section-title">처음 이용하시나요?</div>', unsafe_allow_html=True)
+        with st.form(f"register_form_{form_suffix}", clear_on_submit=False):
             reg_type = st.radio(
-                "가입 유형", ["사업자 (B2B)", "개인 고객 (B2C)"], horizontal=True
+                "고객 유형", ["사업자", "개인 고객"], horizontal=True,
+                key=f"reg_type_{form_suffix}",
             )
-            reg_id = st.text_input("사용할 아이디", key="reg_id")
+            reg_id = st.text_input("사용할 아이디", key=f"reg_id_{form_suffix}")
             reg_phone = st.text_input(
                 "휴대폰 번호",
                 placeholder="010-1234-5678",
-                help="발주 확인과 견적 안내를 위해 사용합니다.",
+                help="견적 확인과 주문 안내 연락에 사용합니다.",
+                key=f"reg_phone_{form_suffix}",
             )
-            reg_pw = st.text_input("비밀번호", type="password", key="reg_pw")
+            reg_pw = st.text_input(
+                "비밀번호", type="password", key=f"reg_pw_{form_suffix}"
+            )
             reg_pw_check = st.text_input(
-                "비밀번호 확인", type="password", key="reg_pw_check"
+                "비밀번호 확인", type="password", key=f"reg_pw_check_{form_suffix}"
             )
-            reg_submitted = st.form_submit_button("회원가입", use_container_width=True)
+            register_label = "회원가입하고 주문하기" if has_pending_order else "회원가입"
+            reg_submitted = st.form_submit_button(register_label, use_container_width=True)
         if reg_submitted:
             if reg_pw != reg_pw_check:
                 st.error("비밀번호와 비밀번호 확인이 일치하지 않습니다.")
             else:
-                ok, message = register_user(reg_id, reg_pw, reg_type, reg_phone)
-                (st.success if ok else st.error)(message)
+                usertype = "사업자 (B2B)" if reg_type == "사업자" else "개인 고객 (B2C)"
+                ok, message = register_user(reg_id, reg_pw, usertype, reg_phone)
+                if not ok:
+                    st.error(message)
+                else:
+                    user = authenticate(reg_id, reg_pw)
+                    if user is None:
+                        st.error("가입은 완료되었지만 자동 로그인에 실패했습니다. 로그인해 주세요.")
+                    else:
+                        set_login_session(user)
+                        complete_pending_order()
+                        st.rerun()
+
+    if embedded and st.button("로그인 창 닫기", use_container_width=True):
+        st.session_state.show_order_auth = False
+        st.session_state.pending_order = None
+        st.rerun()
 
 
 # -----------------------------------------------------------------------------
@@ -729,7 +927,7 @@ def customer_sidebar() -> str:
     with st.sidebar:
         st.markdown(f"### {html.escape(st.session_state.username)} 님")
         st.caption(st.session_state.phone or "휴대폰 번호 미등록")
-        page = st.radio("메뉴", ["새 발주 신청", "내 발주 내역", "계정 설정"])
+        page = st.radio("메뉴", ["새 견적", "내 주문 내역", "계정 설정"])
         st.divider()
         if st.button("로그아웃", use_container_width=True):
             logout()
@@ -738,9 +936,9 @@ def customer_sidebar() -> str:
 
 def render_customer_home() -> None:
     page = customer_sidebar()
-    if page == "새 발주 신청":
+    if page == "새 견적":
         render_new_order()
-    elif page == "내 발주 내역":
+    elif page == "내 주문 내역":
         render_my_orders()
     else:
         render_account_settings(is_admin=False)
@@ -753,8 +951,42 @@ def require_customer_phone() -> bool:
     return False
 
 
-def render_new_order() -> None:
-    app_header("PPT 기준으로 MCT(밀링), CNC(선반), 기타 도면 첨부를 구분했습니다.")
+def render_public_home() -> None:
+    app_header("치수와 재료를 선택하면 예상 가공비를 바로 확인할 수 있습니다.")
+    top_left, top_right = st.columns([3.2, 1])
+    with top_left:
+        st.markdown(
+            '<div class="top-bar"><div><strong>로그인 없이 견적을 확인하세요.</strong><br>'
+            '<span class="muted">주문 접수와 진행 내역 확인 단계에서만 로그인이 필요합니다.</span></div></div>',
+            unsafe_allow_html=True,
+        )
+    with top_right:
+        if st.button("로그인 / 회원가입", use_container_width=True):
+            st.session_state.show_order_auth = True
+            st.rerun()
+    st.markdown(
+        """
+        <div class="process-grid">
+          <div class="process-item"><b>1. 가공 방식</b>밀링, 선반, 도면 검토 중 선택</div>
+          <div class="process-item"><b>2. 규격 입력</b>치수, 재료, 수량 입력</div>
+          <div class="process-item"><b>3. 예상 견적</b>형상과 예상 금액 확인</div>
+          <div class="process-item"><b>4. 주문 접수</b>로그인 후 검토 요청</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    render_new_order(show_header=False)
+    if st.session_state.show_order_auth:
+        st.divider()
+        render_auth(embedded=True)
+
+
+def render_new_order(show_header: bool = True) -> None:
+    if show_header:
+        app_header("기본 형상은 바로 계산하고, 복잡한 형상은 도면을 첨부해 검토를 요청하세요.")
+    if st.session_state.get("flash"):
+        st.success(st.session_state.flash)
+        st.session_state.flash = ""
     order_type = st.radio(
         "가공 방식",
         ["MCT(밀링)", "CNC(선반)", "기타 도면 첨부"],
@@ -770,145 +1002,165 @@ def render_new_order() -> None:
 
 
 def render_milling_order() -> None:
-    left, right = st.columns([0.86, 1.14], gap="large")
-    with left:
-        st.markdown('<div class="section-title">밀링 규격 입력</div>', unsafe_allow_html=True)
+    pricing = get_pricing_settings()
+    preview_slot = st.container()
+
+    st.markdown('<div class="section-title">밀링 규격 입력</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3, gap="medium")
+    with c1:
         material = st.selectbox("재료", list(MATERIALS), key="m_material")
-        c1, c2 = st.columns(2)
-        with c1:
-            width = st.number_input("가로 W (mm)", min_value=0.1, value=100.0, step=1.0)
-            thickness = st.number_input("두께 T (mm)", min_value=0.1, value=10.0, step=1.0)
-            quantity = st.number_input("수량 (개)", min_value=1, value=1, step=1)
-        with c2:
-            length = st.number_input("세로 L (mm)", min_value=0.1, value=150.0, step=1.0)
-            holes = st.number_input("내부 홀 수량", min_value=0, value=0, step=1)
-            kg_price = st.number_input(
-                "재료 기준 단가 (원/kg)",
-                min_value=0,
-                value=int(MATERIALS[material]["default_price"]),
-                step=500,
-                help="예상 금액 계산용입니다. 최종 견적은 대표 관리자가 확정합니다.",
-                key=f"m_price_{material}",
-            )
-        note = st.text_area("작업 요청 사항", placeholder="공차, 표면 처리, 납기 등 필요한 내용을 입력하세요.")
+        width = st.number_input("가로 W (mm)", min_value=0.1, value=100.0, step=1.0)
+    with c2:
+        length = st.number_input("세로 L (mm)", min_value=0.1, value=150.0, step=1.0)
+        thickness = st.number_input("두께 T (mm)", min_value=0.1, value=10.0, step=1.0)
+    with c3:
+        holes = st.number_input("홀 수량 (개)", min_value=0, value=0, step=1)
+        quantity = st.number_input("주문 수량 (개)", min_value=1, value=1, step=1)
+    note = st.text_area(
+        "추가 요청 사항",
+        placeholder="공차, 표면 처리, 모서리 처리, 원하는 납기처럼 도면에 없는 내용을 적어 주세요.",
+    )
 
     density = MATERIALS[material]["density"]
+    kg_price = pricing[MATERIALS[material]["price_key"]]
     weight = width * length * thickness * density / 1_000_000
-    estimate = (weight * kg_price + int(holes) * 1_000) * int(quantity)
-    with right:
-        st.markdown('<div class="section-title">규격 미리보기</div>', unsafe_allow_html=True)
-        st.caption("평면도는 가로×세로, 측면도는 가로×두께입니다. 두 그림은 같은 축척을 사용합니다.")
+    material_each = weight * kg_price
+    machining_each = (
+        width * pricing["milling_width"]
+        + length * pricing["milling_length"]
+        + thickness * pricing["milling_thickness"]
+        + int(holes) * pricing["hole_each"]
+    )
+    estimate = pricing["milling_base"] + (material_each + machining_each) * int(quantity)
+
+    with preview_slot:
+        st.markdown('<div class="preview-title">입력 규격 미리보기</div>', unsafe_allow_html=True)
+        st.caption("도면을 먼저 확인한 뒤 아래 치수를 조정하세요. 평면도와 측면도는 같은 빗금과 치수 표기 기준을 사용합니다.")
         show_svg(draw_milling_svg(width, length, thickness, int(holes)))
-        k1, k2 = st.columns(2)
-        k1.metric("개당 예상 중량", f"{weight:,.3f} kg")
-        k2.metric("예상 금액", money_text(estimate))
-        st.caption("예상 금액은 재료비와 홀 가공 기준값입니다. 대표 관리자가 검토 후 최종 견적을 답변합니다.")
-        if st.button("밀링 발주 접수", use_container_width=True):
-            if require_customer_phone():
-                order_id = create_order(
-                    {
-                        "username": st.session_state.username,
-                        "category": "milling",
-                        "material": material,
-                        "details": f"가로 {width:g} × 세로 {length:g} × 두께 {thickness:g} mm, 내부 홀 {int(holes)}개",
-                        "quantity": int(quantity),
-                        "cost": estimate,
-                        "width_mm": width,
-                        "length_mm": length,
-                        "thickness_mm": thickness,
-                        "diameter_mm": None,
-                        "hole_count": int(holes),
-                        "unit_weight_kg": weight,
-                        "request_note": note,
-                        "attachment_name": "",
-                        "attachment_mime": "",
-                        "attachment_data": None,
-                    }
-                )
-                st.success(f"발주 #{order_id}번이 접수되었습니다. 내 발주 내역에서 확인할 수 있습니다.")
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("개당 예상 중량", f"{weight:,.3f} kg")
+    k2.metric("재료 기준 단가", f"{kg_price:,.0f}원/kg")
+    k3.metric("예상 견적", money_text(estimate))
+    st.markdown(
+        '<div class="estimate-note">입력한 기본 규격을 기준으로 계산한 예상 금액입니다. '
+        '공차, 가공 면수, 형상 난이도, 표면 처리와 납기에 따라 최종 견적이 달라질 수 있습니다. '
+        '주문 접수 단계의 결제 방식은 카드입니다.</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("이 조건으로 밀링 주문 요청", use_container_width=True):
+        submit_or_request_login(
+            {
+                "category": "milling",
+                "material": material,
+                "details": f"가로 {width:g} × 세로 {length:g} × 두께 {thickness:g} mm, 홀 {int(holes)}개",
+                "quantity": int(quantity),
+                "cost": estimate,
+                "width_mm": width,
+                "length_mm": length,
+                "thickness_mm": thickness,
+                "diameter_mm": None,
+                "hole_count": int(holes),
+                "unit_weight_kg": weight,
+                "request_note": note,
+                "attachment_name": "",
+                "attachment_mime": "",
+                "attachment_data": None,
+            }
+        )
 
 
 def render_lathe_order() -> None:
-    left, right = st.columns([0.86, 1.14], gap="large")
-    with left:
-        st.markdown('<div class="section-title">선반 규격 입력</div>', unsafe_allow_html=True)
+    pricing = get_pricing_settings()
+    preview_slot = st.container()
+
+    st.markdown('<div class="section-title">선반 규격 입력</div>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3, gap="medium")
+    with c1:
         material = st.selectbox("재료", list(MATERIALS), key="l_material")
-        c1, c2 = st.columns(2)
-        with c1:
-            diameter = st.number_input("지름 D (mm)", min_value=0.1, value=50.0, step=1.0)
-            quantity = st.number_input("수량 (개)", min_value=1, value=1, step=1, key="l_qty")
-        with c2:
-            length = st.number_input("길이 L (mm)", min_value=0.1, value=150.0, step=1.0)
-            kg_price = st.number_input(
-                "재료 기준 단가 (원/kg)",
-                min_value=0,
-                value=int(MATERIALS[material]["default_price"]),
-                step=500,
-                help="예상 금액 계산용입니다. 최종 견적은 대표 관리자가 확정합니다.",
-                key=f"l_price_{material}",
-            )
-        note = st.text_area("작업 요청 사항", placeholder="공차, 나사, 홈, 표면 처리, 납기 등을 입력하세요.", key="l_note")
+    with c2:
+        diameter = st.number_input("지름 D (mm)", min_value=0.1, value=50.0, step=1.0)
+    with c3:
+        length = st.number_input("길이 L (mm)", min_value=0.1, value=150.0, step=1.0)
+    quantity = st.number_input("주문 수량 (개)", min_value=1, value=1, step=1, key="l_qty")
+    note = st.text_area(
+        "추가 요청 사항",
+        placeholder="공차, 나사, 홈, 표면 처리, 원하는 납기처럼 도면에 없는 내용을 적어 주세요.",
+        key="l_note",
+    )
 
     density = MATERIALS[material]["density"]
+    kg_price = pricing[MATERIALS[material]["price_key"]]
     weight = math.pi * (diameter / 2) ** 2 * length * density / 1_000_000
-    estimate = weight * kg_price * int(quantity)
-    with right:
-        st.markdown('<div class="section-title">규격 미리보기</div>', unsafe_allow_html=True)
-        st.caption("측면도는 길이×지름이며 정면도는 같은 지름의 원형 단면입니다. 두 그림은 같은 축척을 사용합니다.")
+    material_each = weight * kg_price
+    machining_each = (
+        diameter * pricing["lathe_diameter"]
+        + length * pricing["lathe_length"]
+    )
+    estimate = pricing["lathe_base"] + (material_each + machining_each) * int(quantity)
+
+    with preview_slot:
+        st.markdown('<div class="preview-title">입력 규격 미리보기</div>', unsafe_allow_html=True)
+        st.caption("도면을 먼저 확인한 뒤 아래 치수를 조정하세요. 측면도와 정면도는 밀링 도면과 같은 빗금과 치수 표기 기준을 사용합니다.")
         show_svg(draw_lathe_svg(diameter, length))
-        k1, k2 = st.columns(2)
-        k1.metric("개당 예상 중량", f"{weight:,.3f} kg")
-        k2.metric("예상 금액", money_text(estimate))
-        st.caption("예상 금액은 재료비 기준값입니다. 대표 관리자가 검토 후 최종 견적을 답변합니다.")
-        if st.button("선반 발주 접수", use_container_width=True):
-            if require_customer_phone():
-                order_id = create_order(
-                    {
-                        "username": st.session_state.username,
-                        "category": "lathe",
-                        "material": material,
-                        "details": f"지름 Φ{diameter:g} × 길이 {length:g} mm",
-                        "quantity": int(quantity),
-                        "cost": estimate,
-                        "width_mm": None,
-                        "length_mm": length,
-                        "thickness_mm": None,
-                        "diameter_mm": diameter,
-                        "hole_count": 0,
-                        "unit_weight_kg": weight,
-                        "request_note": note,
-                        "attachment_name": "",
-                        "attachment_mime": "",
-                        "attachment_data": None,
-                    }
-                )
-                st.success(f"발주 #{order_id}번이 접수되었습니다. 내 발주 내역에서 확인할 수 있습니다.")
+
+    k1, k2, k3 = st.columns(3)
+    k1.metric("개당 예상 중량", f"{weight:,.3f} kg")
+    k2.metric("재료 기준 단가", f"{kg_price:,.0f}원/kg")
+    k3.metric("예상 견적", money_text(estimate))
+    st.markdown(
+        '<div class="estimate-note">입력한 기본 규격을 기준으로 계산한 예상 금액입니다. '
+        '공차, 나사·홈 가공, 형상 난이도, 표면 처리와 납기에 따라 최종 견적이 달라질 수 있습니다. '
+        '주문 접수 단계의 결제 방식은 카드입니다.</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button("이 조건으로 선반 주문 요청", use_container_width=True):
+        submit_or_request_login(
+            {
+                "category": "lathe",
+                "material": material,
+                "details": f"지름 Φ{diameter:g} × 길이 {length:g} mm",
+                "quantity": int(quantity),
+                "cost": estimate,
+                "width_mm": None,
+                "length_mm": length,
+                "thickness_mm": None,
+                "diameter_mm": diameter,
+                "hole_count": 0,
+                "unit_weight_kg": weight,
+                "request_note": note,
+                "attachment_name": "",
+                "attachment_mime": "",
+                "attachment_data": None,
+            }
+        )
 
 
 def render_drawing_order() -> None:
-    app_header_text = "도면을 올리면 대표 관리자가 검토 후 이 발주 내역에 견적과 답변을 남깁니다."
-    st.markdown(f'<div class="notice-card">{app_header_text}</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="notice-card"><b>복잡한 형상은 도면으로 검토받으세요.</b><br>'
+        '도면과 요청 사항을 확인한 뒤 대표자가 견적, 확인 질문과 진행 내용을 주문 내역에 남깁니다. '
+        '결제 방식은 카드로 접수됩니다.</div>',
+        unsafe_allow_html=True,
+    )
     with st.form("drawing_order_form"):
         c1, c2 = st.columns(2)
         with c1:
             material = st.selectbox("재료", ["도면에 표시", *MATERIALS.keys(), "협의 필요"])
-            quantity = st.number_input("수량 (개)", min_value=1, value=1, step=1, key="d_qty")
+            quantity = st.number_input("주문 수량 (개)", min_value=1, value=1, step=1, key="d_qty")
         with c2:
             uploaded = st.file_uploader(
                 "도면 파일",
                 type=["jpg", "jpeg", "png", "pdf"],
-                help="JPG, PNG, PDF 파일을 지원하며 최대 10MB까지 저장합니다.",
+                help="JPG, PNG, PDF 파일을 지원하며 최대 10MB까지 첨부할 수 있습니다.",
             )
-            st.text_input("결제 방식", value="카드", disabled=True)
         note = st.text_area(
-            "작업 요청 사항",
-            placeholder="가공 부위, 공차, 재료, 납기 등 도면에서 바로 알기 어려운 내용을 적어 주세요.",
+            "추가 요청 사항",
+            placeholder="가공 부위, 공차, 표면 처리, 기준 수량, 원하는 납기처럼 도면에 없는 내용을 적어 주세요.",
         )
-        submitted = st.form_submit_button("도면 견적 요청", use_container_width=True)
+        submitted = st.form_submit_button("도면 검토와 견적 요청", use_container_width=True)
 
     if submitted:
-        if not require_customer_phone():
-            return
         if uploaded is None:
             st.error("검토할 도면 파일을 첨부해 주세요.")
             return
@@ -916,9 +1168,8 @@ def render_drawing_order() -> None:
         if len(data) > 10 * 1024 * 1024:
             st.error("도면 파일은 10MB 이하만 첨부할 수 있습니다.")
             return
-        order_id = create_order(
+        submit_or_request_login(
             {
-                "username": st.session_state.username,
                 "category": "drawing",
                 "material": material,
                 "details": "첨부 도면 검토 요청",
@@ -936,7 +1187,6 @@ def render_drawing_order() -> None:
                 "attachment_data": data,
             }
         )
-        st.success(f"도면 견적 요청 #{order_id}번이 접수되었습니다. 관리자 답변은 내 발주 내역에 표시됩니다.")
 
 
 def render_my_orders() -> None:
@@ -1012,9 +1262,9 @@ def render_account_settings(is_admin: bool) -> None:
 # -----------------------------------------------------------------------------
 def admin_sidebar() -> str:
     with st.sidebar:
-        st.markdown("### 대표 관리자")
+        st.markdown("### 대표자 관리")
         st.caption(ADMIN_ID)
-        page = st.radio("관리 메뉴", ["전체 발주 관리", "회원 연락처", "계정 설정"])
+        page = st.radio("관리 메뉴", ["전체 주문 관리", "가격 설정", "회원 연락처", "계정 설정"])
         st.divider()
         if st.button("로그아웃", use_container_width=True):
             logout()
@@ -1023,12 +1273,69 @@ def admin_sidebar() -> str:
 
 def render_admin_home() -> None:
     page = admin_sidebar()
-    if page == "전체 발주 관리":
+    if page == "전체 주문 관리":
         render_admin_orders()
+    elif page == "가격 설정":
+        render_admin_pricing()
     elif page == "회원 연락처":
         render_customer_contacts()
     else:
         render_account_settings(is_admin=True)
+
+
+def render_admin_pricing() -> None:
+    app_header("예상 견적에 사용하는 가공 치수 단가와 재료 단가를 관리합니다.")
+    current = get_pricing_settings()
+    st.markdown(
+        '<div class="notice-card">고객이 보는 예상 견적에 바로 반영됩니다. '
+        '최종 견적은 주문별 검토 후 전체 주문 관리에서 따로 확정할 수 있습니다.</div>',
+        unsafe_allow_html=True,
+    )
+    with st.form("pricing_settings_form"):
+        st.markdown('<div class="section-title">밀링 가공 기준</div>', unsafe_allow_html=True)
+        m1, m2, m3, m4 = st.columns(4)
+        milling_base = m1.number_input("기본 가공비 (원)", min_value=0.0, value=current["milling_base"], step=1_000.0, key="price_milling_base")
+        milling_width = m2.number_input("가로 1mm당 (원)", min_value=0.0, value=current["milling_width"], step=5.0, key="price_milling_width")
+        milling_length = m3.number_input("세로 1mm당 (원)", min_value=0.0, value=current["milling_length"], step=5.0, key="price_milling_length")
+        milling_thickness = m4.number_input("두께 1mm당 (원)", min_value=0.0, value=current["milling_thickness"], step=10.0, key="price_milling_thickness")
+
+        st.markdown('<div class="section-title">선반 가공 기준</div>', unsafe_allow_html=True)
+        l1, l2, l3, l4 = st.columns(4)
+        lathe_base = l1.number_input("기본 가공비 (원)", min_value=0.0, value=current["lathe_base"], step=1_000.0, key="price_lathe_base")
+        lathe_diameter = l2.number_input("지름 1mm당 (원)", min_value=0.0, value=current["lathe_diameter"], step=5.0, key="price_lathe_diameter")
+        lathe_length = l3.number_input("길이 1mm당 (원)", min_value=0.0, value=current["lathe_length"], step=5.0, key="price_lathe_length")
+        hole_each = l4.number_input("홀 1개당 (원)", min_value=0.0, value=current["hole_each"], step=100.0, key="price_hole_each")
+
+        st.markdown('<div class="section-title">재료 기준 단가</div>', unsafe_allow_html=True)
+        material_values: dict[str, float] = {}
+        material_columns = st.columns(3)
+        for index, (material_name, material) in enumerate(MATERIALS.items()):
+            price_key = material["price_key"]
+            with material_columns[index % 3]:
+                material_values[price_key] = st.number_input(
+                    f"{material_name} (원/kg)",
+                    min_value=0.0,
+                    value=current[price_key],
+                    step=500.0,
+                    key=f"admin_price_{price_key}",
+                )
+        saved = st.form_submit_button("가격 기준 저장", use_container_width=True)
+
+    if saved:
+        save_pricing_settings(
+            {
+                "milling_base": milling_base,
+                "milling_width": milling_width,
+                "milling_length": milling_length,
+                "milling_thickness": milling_thickness,
+                "lathe_base": lathe_base,
+                "lathe_diameter": lathe_diameter,
+                "lathe_length": lathe_length,
+                "hole_each": hole_each,
+                **material_values,
+            }
+        )
+        st.success("가격 기준을 저장했습니다. 새로 계산하는 예상 견적부터 적용됩니다.")
 
 
 def render_admin_orders() -> None:
@@ -1160,7 +1467,7 @@ def main() -> None:
     st.set_page_config(
         page_title=APP_TITLE,
         layout="wide",
-        initial_sidebar_state="expanded",
+        initial_sidebar_state="collapsed",
         page_icon=None,
     )
     inject_global_style()
@@ -1186,7 +1493,7 @@ def main() -> None:
     initialize_session()
 
     if not st.session_state.logged_in:
-        render_auth()
+        render_public_home()
     elif st.session_state.role == "admin":
         render_admin_home()
     else:
