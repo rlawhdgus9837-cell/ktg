@@ -529,6 +529,31 @@ def inject_global_style() -> None:
             padding: .8rem .9rem; color: #435268; font-size: .9rem;
         }
         .process-item b { display: block; color: #254f73; margin-bottom: .2rem; }
+        .process-item span { display: block; }
+        .summary-grid {
+            display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .7rem; margin: .7rem 0 0;
+        }
+        .summary-item {
+            background: #fff; border: 1px solid #e2e8f0; border-radius: 11px;
+            padding: .8rem 1rem; min-width: 0;
+        }
+        .summary-item span { display: block; color: #64748b; font-size: .83rem; }
+        .summary-item strong {
+            display: block; margin-top: .25rem; color: #254f73;
+            font-size: 1.18rem; overflow-wrap: anywhere;
+        }
+        .summary-total { border-color: #b6cadd; background: #f0f6fb; }
+        .dashboard-grid {
+            display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .7rem; margin: .5rem 0 1rem;
+        }
+        .dashboard-item {
+            background: #fff; border: 1px solid #e2e8f0; border-radius: 11px;
+            padding: .75rem .95rem; min-width: 0;
+        }
+        .dashboard-item span { display: block; color: #64748b; font-size: .86rem; }
+        .dashboard-item strong { color: #254f73; font-size: 1.4rem; }
         .soft-card {
             background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px;
             padding: 1.05rem 1.15rem; box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
@@ -625,10 +650,40 @@ def inject_global_style() -> None:
             color: #293548 !important; -webkit-text-fill-color: #293548 !important;
         }
         @media (max-width: 768px) {
-            .block-container { padding: 1rem .85rem 3rem !important; }
+            .block-container { padding: .8rem .85rem 2.5rem !important; }
             .app-title { font-size: 1.45rem; }
             .app-subtitle { font-size: .92rem; }
-            .process-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .process-grid { grid-template-columns: minmax(0, 1fr); gap: 0; margin: .6rem 0 1rem; }
+            .process-item {
+                display: grid; grid-template-columns: minmax(112px, 38%) minmax(0, 1fr);
+                align-items: center; gap: .5rem; border-radius: 0;
+                border-bottom: 0; padding: .65rem .8rem; font-size: .82rem;
+                line-height: 1.35; overflow-wrap: anywhere;
+            }
+            .process-item:first-child { border-radius: 11px 11px 0 0; }
+            .process-item:last-child { border-bottom: 1px solid #e2e8f0; border-radius: 0 0 11px 11px; }
+            .process-item b { margin: 0; font-size: .84rem; }
+            .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+            .summary-item { padding: .7rem .8rem; }
+            .summary-item strong { font-size: 1rem; }
+            .summary-total { grid-column: 1 / -1; grid-row: 1; }
+            .summary-total strong { font-size: 1.35rem; }
+            .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+            .dashboard-item { padding: .7rem .8rem; }
+            .dashboard-item strong { font-size: 1.2rem; }
+            .st-key-order_type [role="radiogroup"] {
+                display: grid !important; grid-template-columns: 1fr !important; gap: .45rem !important;
+            }
+            .st-key-admin_top_menu [role="radiogroup"] {
+                display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+                gap: .45rem !important;
+            }
+            .st-key-order_type [role="radiogroup"] > label,
+            .st-key-admin_top_menu [role="radiogroup"] > label {
+                box-sizing: border-box; width: 100%; margin: 0;
+                border: 1px solid #dce3eb; border-radius: 9px;
+                background: #fff; padding: .45rem .7rem;
+            }
             .top-bar { align-items: flex-start; flex-direction: column; }
             .stApp, .stApp p, .stApp label, .stApp span, .stApp div {
                 color-scheme: only light !important;
@@ -978,12 +1033,68 @@ def draw_lathe_svg(diameter: float, length: float) -> str:
     return svg
 
 
-def show_svg(svg: str, height: int = 410) -> None:
-    components.html(
-        '<div style="width:100%;font-family:Pretendard,Noto Sans KR,Malgun Gothic,sans-serif;">'
-        f"{svg}</div>",
-        height=height,
-        scrolling=False,
+def show_svg(svg: str, kind: str) -> None:
+    """데스크톱에서는 나란히, 휴대폰에서는 도면별로 크게 보여줍니다."""
+    if kind == "milling":
+        mobile_views = (("0 0 350 370", "", False), ("390 82 320 160", "측면도", True))
+    elif kind == "lathe":
+        mobile_views = (("0 0 460 370", "", False), ("465 75 250 255", "정면도", True))
+    else:
+        raise ValueError("알 수 없는 도면 종류입니다.")
+
+    mobile_svgs = []
+    for view_box, label, compact in mobile_views:
+        # 기존 도형·화살표·치수값을 그대로 사용하고, 보이는 영역만 한 도면씩 확대합니다.
+        cropped = svg.replace('viewBox="0 0 720 390"', f'viewBox="{view_box}"', 1)
+        panel_class = "mobile-panel compact" if compact else "mobile-panel"
+        mobile_svgs.append(
+            f'<div class="{panel_class}">'
+            + (f'<div class="mobile-panel-label">{label}</div>' if label else '')
+            + f'{cropped}</div>'
+        )
+
+    st.iframe(
+        """
+        <style>
+        html, body { margin: 0; padding: 0; overflow: hidden; background: #f5f7fa; }
+        #drawing-root { width: 100%; font-family: Pretendard, 'Noto Sans KR', 'Malgun Gothic', sans-serif; }
+        .desktop-diagram { max-width: 720px; margin: 0 auto; }
+        .mobile-diagrams { display: none; }
+        @media (max-width: 768px) {
+          .desktop-diagram { display: none; }
+          .mobile-diagrams { display: grid; gap: 10px; }
+          .mobile-panel { min-width: 0; }
+          .mobile-panel.compact {
+            box-sizing: border-box; overflow: hidden; padding: 9px 6px 10px;
+            background: #fff; border: 1px solid #dde5ee; border-radius: 12px;
+          }
+          .mobile-panel.compact svg rect[fill="#fff"][stroke="#dde5ee"] { display: none; }
+          .mobile-panel.compact svg text[font-size="13"] { display: none; }
+          .mobile-panel-label { color: #334155; font-size: 14px; font-weight: 700; margin: 0 0 3px 4px; }
+          .mobile-panel svg { width: 100%; height: auto; display: block; }
+          .mobile-panel svg text[font-size="12"] { font-size: 14px; }
+        }
+        </style>
+        <div id="drawing-root">
+          <div class="desktop-diagram">
+        """
+        + svg
+        + '</div><div class="mobile-diagrams">'
+        + "".join(mobile_svgs)
+        + """</div></div>""",
+        height="content",
+        width="stretch",
+    )
+
+
+def render_estimate_summary(weight: float, kg_price: float, estimate: float) -> None:
+    st.markdown(
+        '<div class="summary-grid">'
+        f'<div class="summary-item"><span>개당 예상 중량</span><strong>{weight:,.3f} kg</strong></div>'
+        f'<div class="summary-item"><span>재료 기준 단가</span><strong>{kg_price:,.0f}원/kg</strong></div>'
+        f'<div class="summary-item summary-total"><span>예상 견적</span><strong>{money_text(estimate)}</strong></div>'
+        '</div>',
+        unsafe_allow_html=True,
     )
 
 
@@ -1196,10 +1307,10 @@ def render_public_home() -> None:
     st.markdown(
         """
         <div class="process-grid">
-          <div class="process-item"><b>1. 가공 방식 선택</b>밀링, 선반, 도면 검토 중에서 선택합니다.</div>
-          <div class="process-item"><b>2. 규격 입력</b>재료와 치수, 주문 수량을 입력합니다.</div>
-          <div class="process-item"><b>3. 예상 견적 확인</b>도형과 예상 금액을 바로 확인합니다.</div>
-          <div class="process-item"><b>4. 주문 요청</b>로그인 후 검토 요청을 접수합니다.</div>
+          <div class="process-item"><b>1. 가공 방식 선택</b><span>밀링, 선반, 도면 검토 중에서 선택합니다.</span></div>
+          <div class="process-item"><b>2. 규격 입력</b><span>재료와 치수, 주문 수량을 입력합니다.</span></div>
+          <div class="process-item"><b>3. 예상 견적 확인</b><span>도형과 예상 금액을 바로 확인합니다.</span></div>
+          <div class="process-item"><b>4. 주문 요청</b><span>로그인 후 검토 요청을 접수합니다.</span></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1219,6 +1330,7 @@ def render_new_order(show_header: bool = True) -> None:
         "가공 방식",
         ["MCT(밀링)", "CNC(선반)", "기타 도면 첨부"],
         horizontal=True,
+        key="order_type",
     )
     st.divider()
     if order_type == "MCT(밀링)":
@@ -1264,12 +1376,9 @@ def render_milling_order() -> None:
     with preview_slot:
         st.markdown('<div class="preview-title">입력 규격 미리보기</div>', unsafe_allow_html=True)
         st.caption("도면을 먼저 확인한 뒤 아래 치수를 조정하세요. 평면도와 측면도는 같은 빗금과 치수 표기 기준을 사용합니다.")
-        show_svg(draw_milling_svg(width, length, thickness, int(holes)))
+        show_svg(draw_milling_svg(width, length, thickness, int(holes)), "milling")
 
-    k1, k2, k3 = st.columns(3)
-    k1.metric("개당 예상 중량", f"{weight:,.3f} kg")
-    k2.metric("재료 기준 단가", f"{kg_price:,.0f}원/kg")
-    k3.metric("예상 견적", money_text(estimate))
+    render_estimate_summary(weight, kg_price, estimate)
     st.markdown(
         '<div class="estimate-note">입력한 기본 규격을 기준으로 계산한 예상 금액입니다. '
         '공차, 가공 면수, 형상 난이도, 표면 처리와 납기에 따라 최종 견적이 달라질 수 있습니다. '
@@ -1330,12 +1439,9 @@ def render_lathe_order() -> None:
     with preview_slot:
         st.markdown('<div class="preview-title">입력 규격 미리보기</div>', unsafe_allow_html=True)
         st.caption("도면을 먼저 확인한 뒤 아래 치수를 조정하세요. 측면도와 정면도는 밀링 도면과 같은 빗금과 치수 표기 기준을 사용합니다.")
-        show_svg(draw_lathe_svg(diameter, length))
+        show_svg(draw_lathe_svg(diameter, length), "lathe")
 
-    k1, k2, k3 = st.columns(3)
-    k1.metric("개당 예상 중량", f"{weight:,.3f} kg")
-    k2.metric("재료 기준 단가", f"{kg_price:,.0f}원/kg")
-    k3.metric("예상 견적", money_text(estimate))
+    render_estimate_summary(weight, kg_price, estimate)
     st.markdown(
         '<div class="estimate-note">입력한 기본 규격을 기준으로 계산한 예상 금액입니다. '
         '공차, 나사·홈 가공, 형상 난이도, 표면 처리와 납기에 따라 최종 견적이 달라질 수 있습니다. '
@@ -1595,11 +1701,15 @@ def render_admin_orders() -> None:
         for row in orders
     )
     shipped = sum(row["status"] == "출하" for row in orders)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("전체 발주", total)
-    m2.metric("검토 필요", waiting)
-    m3.metric("도면 답변 대기", drawing_waiting)
-    m4.metric("출하 완료", shipped)
+    st.markdown(
+        '<div class="dashboard-grid">'
+        f'<div class="dashboard-item"><span>전체 발주</span><strong>{total}</strong></div>'
+        f'<div class="dashboard-item"><span>검토 필요</span><strong>{waiting}</strong></div>'
+        f'<div class="dashboard-item"><span>도면 답변 대기</span><strong>{drawing_waiting}</strong></div>'
+        f'<div class="dashboard-item"><span>출하 완료</span><strong>{shipped}</strong></div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
 
     st.markdown('<div class="section-title" style="margin-top:1.4rem">발주 검색</div>', unsafe_allow_html=True)
     f1, f2, f3 = st.columns([1, 1, 1.4])
