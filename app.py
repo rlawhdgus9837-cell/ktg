@@ -554,6 +554,7 @@ def inject_global_style() -> None:
         }
         .dashboard-item span { display: block; color: #64748b; font-size: .86rem; }
         .dashboard-item strong { color: #254f73; font-size: 1.4rem; }
+        .mobile-only { display: none; }
         .soft-card {
             background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px;
             padding: 1.05rem 1.15rem; box-shadow: 0 4px 14px rgba(15, 23, 42, .04);
@@ -650,6 +651,8 @@ def inject_global_style() -> None:
             color: #293548 !important; -webkit-text-fill-color: #293548 !important;
         }
         @media (max-width: 768px) {
+            .mobile-only { display: grid; }
+            .st-key-desktop_estimate, .st-key-desktop_dashboard { display: none !important; }
             .block-container { padding: .8rem .85rem 2.5rem !important; }
             .app-title { font-size: 1.45rem; }
             .app-subtitle { font-size: .92rem; }
@@ -923,9 +926,14 @@ def dimension_line(
     label_y: float,
     anchor: str = "middle",
 ) -> str:
+    arrow = min(7.0, max(1.5, (x2 - x1) / 3))
     return (
         f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-        'stroke="#60758d" stroke-width="1.4" marker-start="url(#dimStart)" marker-end="url(#dimEnd)"/>'
+        'stroke="#60758d" stroke-width="1.4"/>'
+        f'<path d="M{x1:.1f} {y1:.1f} L{x1 + arrow:.1f} {y1 - 3:.1f} '
+        f'L{x1 + arrow:.1f} {y1 + 3:.1f} Z" fill="#60758d"/>'
+        f'<path d="M{x2:.1f} {y2:.1f} L{x2 - arrow:.1f} {y2 - 3:.1f} '
+        f'L{x2 - arrow:.1f} {y2 + 3:.1f} Z" fill="#60758d"/>'
         f'<text x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="{anchor}" '
         f'font-size="12" font-weight="700" fill="#334155">{html.escape(label)}</text>'
     )
@@ -939,12 +947,62 @@ def vertical_dimension_line(
     label_x: float,
 ) -> str:
     middle_y = (y1 + y2) / 2
+    arrow = min(7.0, max(1.5, (y2 - y1) / 3))
     return (
         f'<line x1="{x:.1f}" y1="{y1:.1f}" x2="{x:.1f}" y2="{y2:.1f}" '
-        'stroke="#60758d" stroke-width="1.4" marker-start="url(#dimStart)" marker-end="url(#dimEnd)"/>'
+        'stroke="#60758d" stroke-width="1.4"/>'
+        f'<path d="M{x:.1f} {y1:.1f} L{x - 3:.1f} {y1 + arrow:.1f} '
+        f'L{x + 3:.1f} {y1 + arrow:.1f} Z" fill="#60758d"/>'
+        f'<path d="M{x:.1f} {y2:.1f} L{x - 3:.1f} {y2 - arrow:.1f} '
+        f'L{x + 3:.1f} {y2 - arrow:.1f} Z" fill="#60758d"/>'
         f'<text x="{label_x:.1f}" y="{middle_y:.1f}" text-anchor="middle" '
         f'transform="rotate(-90 {label_x:.1f} {middle_y:.1f})" '
         f'font-size="12" font-weight="700" fill="#334155">{html.escape(label)}</text>'
+    )
+
+
+def hatched_rectangle(x: float, y: float, width: float, height: float) -> str:
+    """별도 SVG 패턴 없이, 실제 형상 안에만 빗금을 그립니다."""
+    strokes = []
+    for offset in range(-math.ceil(height / 11) * 11, math.ceil(width / 11) * 11 + 1, 11):
+        left = max(x, x + offset)
+        right = min(x + width, x + offset + height)
+        if right <= left:
+            continue
+        top_y = y + height - (left - x - offset)
+        bottom_y = y + height - (right - x - offset)
+        strokes.append(
+            f'<line x1="{left:.2f}" y1="{top_y:.2f}" '
+            f'x2="{right:.2f}" y2="{bottom_y:.2f}" '
+            'stroke="#abc9e5" stroke-width="2"/>'
+        )
+    return (
+        f'<rect x="{x:.2f}" y="{y:.2f}" width="{width:.2f}" '
+        f'height="{height:.2f}" fill="#edf5fc"/>'
+        + "".join(strokes)
+        + f'<rect x="{x:.2f}" y="{y:.2f}" width="{width:.2f}" '
+        f'height="{height:.2f}" fill="none" stroke="#4f8ed8" stroke-width="2"/>'
+    )
+
+
+def hatched_circle(cx: float, cy: float, radius: float) -> str:
+    strokes = []
+    reach = math.sqrt(2) * radius
+    for offset in range(-math.ceil(reach / 11) * 11, math.ceil(reach / 11) * 11 + 1, 11):
+        if abs(offset) >= reach:
+            continue
+        half = math.sqrt(radius * radius - offset * offset / 2) / math.sqrt(2)
+        center_x, center_y = cx + offset / 2, cy + offset / 2
+        strokes.append(
+            f'<line x1="{center_x - half:.2f}" y1="{center_y + half:.2f}" '
+            f'x2="{center_x + half:.2f}" y2="{center_y - half:.2f}" '
+            'stroke="#abc9e5" stroke-width="2"/>'
+        )
+    return (
+        f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{radius:.2f}" fill="#edf5fc"/>'
+        + "".join(strokes)
+        + f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{radius:.2f}" '
+        'fill="none" stroke="#4f8ed8" stroke-width="2"/>'
     )
 
 
@@ -973,22 +1031,15 @@ def draw_milling_svg(width: float, length: float, thickness: float, holes: int) 
 
     svg = f"""
     <svg viewBox="0 0 720 390" style="width:100%;height:auto;display:block;overflow:hidden" role="img" aria-label="밀링 규격 도면">
-      <defs>
-        <pattern id="millingHatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="9" stroke="#b6d2ee" stroke-width="3"/>
-        </pattern>
-        <marker id="dimStart" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto"><path d="M7,0 L0,3.5 L7,7" fill="#60758d"/></marker>
-        <marker id="dimEnd" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="#60758d"/></marker>
-      </defs>
       <rect x="10" y="10" width="330" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
       <rect x="380" y="10" width="330" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
       <text x="30" y="42" font-size="16" font-weight="700" fill="#334155">평면도</text>
       <text x="400" y="42" font-size="16" font-weight="700" fill="#334155">측면도</text>
-      <rect x="{top_x:.1f}" y="{top_y:.1f}" width="{sw:.1f}" height="{sl:.1f}" fill="url(#millingHatch)" stroke="#4f8ed8" stroke-width="2"/>
+      {hatched_rectangle(top_x, top_y, sw, sl)}
       {''.join(circles)}
       {dimension_line(top_x, 72, top_x + sw, 72, f'가로 W {width:g} mm', top_x + sw / 2, 61)}
       {vertical_dimension_line(68, top_y, top_y + sl, f'세로 L {length:g} mm', 45)}
-      <rect x="{side_x:.1f}" y="{side_y:.1f}" width="{sw:.1f}" height="{stt:.1f}" fill="url(#millingHatch)" stroke="#4f8ed8" stroke-width="2"/>
+      {hatched_rectangle(side_x, side_y, sw, stt)}
       {dimension_line(side_x, 112, side_x + sw, 112, f'가로 W {width:g} mm', side_x + sw / 2, 100)}
       {vertical_dimension_line(432, side_y, side_y + stt, f'높이 T {thickness:g} mm', 409)}
       <text x="175" y="340" text-anchor="middle" font-size="13" fill="#64748b">가로 × 세로</text>
@@ -1008,22 +1059,15 @@ def draw_lathe_svg(diameter: float, length: float) -> str:
     circle_x, circle_y = 590, 190
     svg = f"""
     <svg viewBox="0 0 720 390" style="width:100%;height:auto;display:block;overflow:hidden" role="img" aria-label="선반 규격 도면">
-      <defs>
-        <pattern id="latheHatch" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="9" stroke="#b6d2ee" stroke-width="3"/>
-        </pattern>
-        <marker id="dimStart" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto"><path d="M7,0 L0,3.5 L7,7" fill="#60758d"/></marker>
-        <marker id="dimEnd" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7" fill="#60758d"/></marker>
-      </defs>
       <rect x="10" y="10" width="440" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
       <rect x="470" y="10" width="240" height="350" rx="12" fill="#fff" stroke="#dde5ee"/>
       <text x="30" y="42" font-size="16" font-weight="700" fill="#334155">측면도</text>
       <text x="490" y="42" font-size="16" font-weight="700" fill="#334155">정면도</text>
-      <rect x="{body_x:.1f}" y="{body_y:.1f}" width="{sl:.1f}" height="{sd:.1f}" fill="url(#latheHatch)" stroke="#4f8ed8" stroke-width="2"/>
+      {hatched_rectangle(body_x, body_y, sl, sd)}
       <line x1="{body_x - 12:.1f}" y1="{body_y + sd/2:.1f}" x2="{body_x + sl + 12:.1f}" y2="{body_y + sd/2:.1f}" stroke="#75869a" stroke-dasharray="7 5"/>
       {dimension_line(body_x, 76, body_x + sl, 76, f'길이 L {length:g} mm', body_x + sl / 2, 64)}
       {vertical_dimension_line(62, body_y, body_y + sd, f'지름 D {diameter:g} mm', 39)}
-      <circle cx="{circle_x}" cy="{circle_y}" r="{circle_r:.1f}" fill="url(#latheHatch)" stroke="#4f8ed8" stroke-width="2"/>
+      {hatched_circle(circle_x, circle_y, circle_r)}
       <line x1="{circle_x - circle_r - 8:.1f}" y1="{circle_y}" x2="{circle_x + circle_r + 8:.1f}" y2="{circle_y}" stroke="#75869a" stroke-dasharray="7 5"/>
       {dimension_line(circle_x - circle_r, circle_y + circle_r + 24, circle_x + circle_r, circle_y + circle_r + 24, f'지름 D {diameter:g} mm', circle_x, circle_y + circle_r + 43)}
       <text x="230" y="340" text-anchor="middle" font-size="13" fill="#64748b">길이 × 지름</text>
@@ -1058,9 +1102,9 @@ def show_svg(svg: str, kind: str) -> None:
         <style>
         html, body { margin: 0; padding: 0; overflow: hidden; background: #f5f7fa; }
         #drawing-root { width: 100%; font-family: Pretendard, 'Noto Sans KR', 'Malgun Gothic', sans-serif; }
-        .desktop-diagram { max-width: 720px; margin: 0 auto; }
+        .desktop-diagram { max-width: 960px; margin: 0 auto; }
         .mobile-diagrams { display: none; }
-        @media (max-width: 768px) {
+        @media (max-width: 640px), (hover: none) and (pointer: coarse) and (max-width: 950px) {
           .desktop-diagram { display: none; }
           .mobile-diagrams { display: grid; gap: 10px; }
           .mobile-panel { min-width: 0; }
@@ -1072,7 +1116,7 @@ def show_svg(svg: str, kind: str) -> None:
           .mobile-panel.compact svg text[font-size="13"] { display: none; }
           .mobile-panel-label { color: #334155; font-size: 14px; font-weight: 700; margin: 0 0 3px 4px; }
           .mobile-panel svg { width: 100%; height: auto; display: block; }
-          .mobile-panel svg text[font-size="12"] { font-size: 14px; }
+          .mobile-panel svg text[font-size="12"] { font-size: 16px; }
         }
         </style>
         <div id="drawing-root">
@@ -1088,8 +1132,13 @@ def show_svg(svg: str, kind: str) -> None:
 
 
 def render_estimate_summary(weight: float, kg_price: float, estimate: float) -> None:
+    with st.container(key="desktop_estimate"):
+        k1, k2, k3 = st.columns(3)
+        k1.metric("개당 예상 중량", f"{weight:,.3f} kg")
+        k2.metric("재료 기준 단가", f"{kg_price:,.0f}원/kg")
+        k3.metric("예상 견적", money_text(estimate))
     st.markdown(
-        '<div class="summary-grid">'
+        '<div class="summary-grid mobile-only">'
         f'<div class="summary-item"><span>개당 예상 중량</span><strong>{weight:,.3f} kg</strong></div>'
         f'<div class="summary-item"><span>재료 기준 단가</span><strong>{kg_price:,.0f}원/kg</strong></div>'
         f'<div class="summary-item summary-total"><span>예상 견적</span><strong>{money_text(estimate)}</strong></div>'
@@ -1701,8 +1750,14 @@ def render_admin_orders() -> None:
         for row in orders
     )
     shipped = sum(row["status"] == "출하" for row in orders)
+    with st.container(key="desktop_dashboard"):
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("전체 발주", total)
+        m2.metric("검토 필요", waiting)
+        m3.metric("도면 답변 대기", drawing_waiting)
+        m4.metric("출하 완료", shipped)
     st.markdown(
-        '<div class="dashboard-grid">'
+        '<div class="dashboard-grid mobile-only">'
         f'<div class="dashboard-item"><span>전체 발주</span><strong>{total}</strong></div>'
         f'<div class="dashboard-item"><span>검토 필요</span><strong>{waiting}</strong></div>'
         f'<div class="dashboard-item"><span>도면 답변 대기</span><strong>{drawing_waiting}</strong></div>'
