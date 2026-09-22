@@ -29,7 +29,7 @@ class SQLiteCompatConnection:
         self.connection = connection
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
-        query = sql.replace("%s", "?")
+        query = sql.replace("%s", "?").replace(" FOR UPDATE", "")
         return self.connection.execute(query, params)
 
     def commit(self) -> None:
@@ -68,6 +68,7 @@ def init_demo_db() -> bool:
                 password TEXT NOT NULL,
                 usertype TEXT DEFAULT '개인 고객 (B2C)',
                 phone TEXT DEFAULT '',
+                company_name TEXT DEFAULT '',
                 role TEXT DEFAULT 'customer',
                 created_at TEXT DEFAULT ''
             )
@@ -91,8 +92,15 @@ def init_demo_db() -> bool:
                 hole_count INTEGER DEFAULT 0,
                 unit_weight_kg REAL DEFAULT 0,
                 request_note TEXT DEFAULT '',
+                project_name TEXT DEFAULT '',
+                desired_date TEXT DEFAULT '',
+                tolerance TEXT DEFAULT '',
+                surface_finish TEXT DEFAULT '',
                 admin_reply TEXT DEFAULT '',
                 quoted_cost REAL DEFAULT 0,
+                quoted_delivery TEXT DEFAULT '',
+                quote_valid_until TEXT DEFAULT '',
+                quote_accepted_at TEXT DEFAULT '',
                 status TEXT DEFAULT '접수',
                 payment_method TEXT DEFAULT '카드',
                 attachment_name TEXT DEFAULT '',
@@ -114,6 +122,20 @@ def init_demo_db() -> bool:
             )
             """
         )
+        # 기존 데모 파일도 삭제하지 않고 필요한 열만 더합니다.
+        for table, columns in {
+            "users": {"company_name": "TEXT DEFAULT ''"},
+            "orders": {
+                "project_name": "TEXT DEFAULT ''", "desired_date": "TEXT DEFAULT ''",
+                "tolerance": "TEXT DEFAULT ''", "surface_finish": "TEXT DEFAULT ''",
+                "quoted_delivery": "TEXT DEFAULT ''", "quote_valid_until": "TEXT DEFAULT ''",
+                "quote_accepted_at": "TEXT DEFAULT ''",
+            },
+        }.items():
+            existing_columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            for name, definition in columns.items():
+                if name not in existing_columns:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
         for setting_key, setting in core.PRICING_DEFAULTS.items():
             conn.execute(
                 """
@@ -154,7 +176,7 @@ def init_demo_db() -> bool:
 
 
 def register_demo_user(
-    username: str, password: str, usertype: str, phone: str
+    username: str, password: str, usertype: str, phone: str, company_name: str = ""
 ) -> tuple[bool, str]:
     username = username.strip()
     normalized_phone = core.normalize_phone(phone)
@@ -162,8 +184,8 @@ def register_demo_user(
         return False, "아이디는 2~30자의 한글, 영문, 숫자, 밑줄, 마침표, 하이픈만 사용할 수 있습니다."
     if username == DEMO_ADMIN_ID:
         return False, "대표 계정 아이디는 사용할 수 없습니다."
-    if len(password) < 6:
-        return False, "비밀번호는 6자 이상 입력해 주세요."
+    if len(password) < 8:
+        return False, "비밀번호는 8자 이상 입력해 주세요."
     if normalized_phone is None:
         return False, "연락 가능한 휴대폰 번호를 정확히 입력해 주세요."
     try:
@@ -171,14 +193,15 @@ def register_demo_user(
             conn.execute(
                 """
                 INSERT INTO users
-                    (username, password, usertype, phone, role, created_at)
-                VALUES (?, ?, ?, ?, 'customer', ?)
+                    (username, password, usertype, phone, company_name, role, created_at)
+                VALUES (?, ?, ?, ?, ?, 'customer', ?)
                 """,
                 (
                     username,
                     core.hash_password(password),
                     usertype,
                     normalized_phone,
+                    company_name.strip()[:100],
                     core.now_text(),
                 ),
             )
@@ -203,8 +226,15 @@ def create_demo_order(values: dict[str, Any]) -> int:
         "hole_count",
         "unit_weight_kg",
         "request_note",
+        "project_name",
+        "desired_date",
+        "tolerance",
+        "surface_finish",
         "admin_reply",
         "quoted_cost",
+        "quoted_delivery",
+        "quote_valid_until",
+        "quote_accepted_at",
         "status",
         "payment_method",
         "attachment_name",
@@ -218,6 +248,9 @@ def create_demo_order(values: dict[str, Any]) -> int:
             "date": values.get("date") or core.now_text(),
             "admin_reply": values.get("admin_reply") or "",
             "quoted_cost": values.get("quoted_cost") or 0,
+            "quoted_delivery": values.get("quoted_delivery") or "",
+            "quote_valid_until": values.get("quote_valid_until") or "",
+            "quote_accepted_at": values.get("quote_accepted_at") or "",
             "status": values.get("status") or "접수",
             "payment_method": values.get("payment_method") or "카드",
             "updated_at": core.now_text(),

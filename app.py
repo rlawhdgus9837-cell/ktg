@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import csv
+import io
 import json
 import math
 import os
@@ -61,6 +63,7 @@ PRICING_DEFAULTS = {
 ORDER_STATUSES = [
     "접수",
     "견적 검토",
+    "견적 제안",
     "결제 대기",
     "가공 준비",
     "가공 시작",
@@ -142,6 +145,7 @@ def init_db() -> bool:
                 password TEXT NOT NULL,
                 usertype TEXT DEFAULT '개인 고객 (B2C)',
                 phone TEXT DEFAULT '',
+                company_name TEXT DEFAULT '',
                 role TEXT DEFAULT 'customer',
                 created_at TEXT DEFAULT ''
             )
@@ -149,6 +153,7 @@ def init_db() -> bool:
         )
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS usertype TEXT DEFAULT '개인 고객 (B2C)'")
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT ''")
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name TEXT DEFAULT ''")
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'customer'")
         conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TEXT DEFAULT ''")
 
@@ -170,8 +175,15 @@ def init_db() -> bool:
                 hole_count INTEGER DEFAULT 0,
                 unit_weight_kg REAL DEFAULT 0,
                 request_note TEXT DEFAULT '',
+                project_name TEXT DEFAULT '',
+                desired_date TEXT DEFAULT '',
+                tolerance TEXT DEFAULT '',
+                surface_finish TEXT DEFAULT '',
                 admin_reply TEXT DEFAULT '',
                 quoted_cost REAL DEFAULT 0,
+                quoted_delivery TEXT DEFAULT '',
+                quote_valid_until TEXT DEFAULT '',
+                quote_accepted_at TEXT DEFAULT '',
                 status TEXT DEFAULT '접수',
                 payment_method TEXT DEFAULT '카드',
                 attachment_name TEXT DEFAULT '',
@@ -190,8 +202,15 @@ def init_db() -> bool:
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS hole_count INTEGER DEFAULT 0",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS unit_weight_kg REAL DEFAULT 0",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_note TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS project_name TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS desired_date TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS tolerance TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS surface_finish TEXT DEFAULT ''",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_reply TEXT DEFAULT ''",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS quoted_cost REAL DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS quoted_delivery TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS quote_valid_until TEXT DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS quote_accepted_at TEXT DEFAULT ''",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT '접수'",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT '카드'",
             "ALTER TABLE orders ADD COLUMN IF NOT EXISTS attachment_name TEXT DEFAULT ''",
@@ -268,15 +287,15 @@ def normalize_phone(value: str) -> str | None:
     return None
 
 
-def register_user(username: str, password: str, usertype: str, phone: str) -> tuple[bool, str]:
+def register_user(username: str, password: str, usertype: str, phone: str, company_name: str = "") -> tuple[bool, str]:
     username = username.strip()
     normalized_phone = normalize_phone(phone)
     if not re.fullmatch(r"[A-Za-z0-9가-힣_.-]{2,30}", username):
         return False, "아이디는 2~30자의 한글, 영문, 숫자, 밑줄, 마침표, 하이픈만 사용할 수 있습니다."
     if username == ADMIN_ID:
         return False, "대표 계정 아이디는 사용할 수 없습니다."
-    if len(password) < 6:
-        return False, "비밀번호는 6자 이상 입력해 주세요."
+    if len(password) < 8:
+        return False, "비밀번호는 8자 이상 입력해 주세요."
     if normalized_phone is None:
         return False, "연락 가능한 휴대폰 번호를 정확히 입력해 주세요."
     try:
@@ -284,10 +303,10 @@ def register_user(username: str, password: str, usertype: str, phone: str) -> tu
             conn.execute(
                 """
                 INSERT INTO users
-                    (username, password, usertype, phone, role, created_at)
-                VALUES (%s, %s, %s, %s, 'customer', %s)
+                    (username, password, usertype, phone, company_name, role, created_at)
+                VALUES (%s, %s, %s, %s, %s, 'customer', %s)
                 """,
-                (username, hash_password(password), usertype, normalized_phone, now_text()),
+                (username, hash_password(password), usertype, normalized_phone, company_name.strip()[:100], now_text()),
             )
         return True, "회원가입이 완료되었습니다. 왼쪽에서 로그인해 주세요."
     except errors.UniqueViolation:
@@ -318,6 +337,13 @@ def update_phone(username: str, phone: str) -> tuple[bool, str]:
     with db_connection() as conn:
         conn.execute("UPDATE users SET phone=%s WHERE username=%s", (normalized, username))
     return True, normalized
+
+
+def update_company_name(username: str, company_name: str) -> str:
+    company_name = company_name.strip()[:100]
+    with db_connection() as conn:
+        conn.execute("UPDATE users SET company_name=%s WHERE username=%s", (company_name, username))
+    return company_name
 
 
 def change_password(username: str, current: str, new: str) -> tuple[bool, str]:
@@ -352,8 +378,15 @@ def create_order(values: dict[str, Any]) -> int:
         "hole_count",
         "unit_weight_kg",
         "request_note",
+        "project_name",
+        "desired_date",
+        "tolerance",
+        "surface_finish",
         "admin_reply",
         "quoted_cost",
+        "quoted_delivery",
+        "quote_valid_until",
+        "quote_accepted_at",
         "status",
         "payment_method",
         "attachment_name",
@@ -367,6 +400,9 @@ def create_order(values: dict[str, Any]) -> int:
             "date": values.get("date") or now_text(),
             "admin_reply": values.get("admin_reply") or "",
             "quoted_cost": values.get("quoted_cost") or 0,
+            "quoted_delivery": values.get("quoted_delivery") or "",
+            "quote_valid_until": values.get("quote_valid_until") or "",
+            "quote_accepted_at": values.get("quote_accepted_at") or "",
             "status": values.get("status") or "접수",
             "payment_method": values.get("payment_method") or "카드",
             "updated_at": now_text(),
@@ -383,7 +419,7 @@ def create_order(values: dict[str, Any]) -> int:
 
 def get_orders(username: str | None = None) -> list[dict[str, Any]]:
     query = """
-        SELECT o.*, u.phone, u.usertype
+        SELECT o.*, u.phone, u.usertype, u.company_name
         FROM orders o
         LEFT JOIN users u ON u.username=o.username
     """
@@ -397,19 +433,60 @@ def get_orders(username: str | None = None) -> list[dict[str, Any]]:
 
 
 def update_order_by_admin(
-    order_id: int, status: str, quoted_cost: float, admin_reply: str
+    order_id: int, status: str, quoted_cost: float, admin_reply: str,
+    quoted_delivery: str = "", quote_valid_until: str = "",
 ) -> None:
     if status not in ORDER_STATUSES:
         raise ValueError("허용되지 않은 진행 상태입니다.")
     with db_connection() as conn:
+        previous = conn.execute(
+            "SELECT status, quoted_cost, quote_accepted_at FROM orders WHERE id=%s FOR UPDATE",
+            (order_id,),
+        ).fetchone()
+        if previous is None:
+            raise ValueError("발주를 찾지 못했습니다.")
+        new_quote = max(0, float(quoted_cost))
+        quote_changed = abs(float(previous["quoted_cost"] or 0) - new_quote) >= 0.5
+        accepted = bool(previous["quote_accepted_at"])
+        advanced = {"결제 대기", "가공 준비", "가공 시작", "가공 완료", "포장", "출하"}
+        if accepted and quote_changed and previous["status"] in advanced:
+            raise ValueError("고객이 수락한 견적은 진행 중에 수정할 수 없습니다. 고객에게 별도로 안내해 주세요.")
+        if accepted and status not in advanced:
+            raise ValueError("고객이 수락한 견적은 이전 검토 단계로 되돌릴 수 없습니다.")
+        if status in advanced and not accepted and previous["status"] not in advanced:
+            raise ValueError("고객이 견적을 확인한 뒤에 결제 대기·가공 단계로 변경할 수 있습니다.")
+        if new_quote > 0 and (quote_changed or status == "견적 제안") and status not in advanced:
+            status = "견적 제안"
+        if status == "견적 제안" and new_quote <= 0:
+            raise ValueError("견적 금액을 입력해 주세요.")
         conn.execute(
             """
             UPDATE orders
-            SET status=%s, quoted_cost=%s, admin_reply=%s, updated_at=%s
+            SET status=%s, quoted_cost=%s, admin_reply=%s,
+                quoted_delivery=%s, quote_valid_until=%s, quote_accepted_at=%s,
+                updated_at=%s
             WHERE id=%s
             """,
-            (status, max(0, quoted_cost), admin_reply.strip(), now_text(), order_id),
+            (status, new_quote, admin_reply.strip(), quoted_delivery.strip()[:100],
+             quote_valid_until.strip(), "" if quote_changed else previous["quote_accepted_at"] or "",
+             now_text(), order_id),
         )
+
+
+def accept_quote(order_id: int, username: str) -> bool:
+    """고객 본인만, 유효한 대표 견적을 한 번 승인할 수 있습니다."""
+    with db_connection() as conn:
+        row = conn.execute(
+            """
+            UPDATE orders
+            SET status='결제 대기', quote_accepted_at=%s, updated_at=%s
+            WHERE id=%s AND username=%s AND status='견적 제안'
+              AND quoted_cost>0 AND (quote_valid_until='' OR quote_valid_until IS NULL OR quote_valid_until>=%s)
+            RETURNING id
+            """,
+            (now_text(), now_text(), order_id, username, now_text()[:10]),
+        ).fetchone()
+        return row is not None
 
 
 def get_pricing_settings() -> dict[str, float]:
@@ -741,6 +818,9 @@ def inject_global_style() -> None:
         """,
         height=0,
     )
+    theme_file = Path(__file__).with_name("site.css")
+    if theme_file.is_file():
+        st.markdown(f"<style>{theme_file.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
 
 def app_header(description: str = "", centered: bool = False) -> None:
@@ -762,6 +842,7 @@ def initialize_session() -> None:
         "username": "",
         "role": "",
         "phone": "",
+        "company_name": "",
         "flash": "",
         "pending_order": None,
         "show_order_auth": False,
@@ -787,6 +868,7 @@ def logout() -> None:
         "username",
         "role",
         "phone",
+        "company_name",
         "flash",
         "pending_order",
         "show_order_auth",
@@ -811,6 +893,7 @@ def set_login_session(user: dict[str, Any]) -> None:
     st.session_state.username = user["username"]
     st.session_state.role = user["role"] or "customer"
     st.session_state.phone = user["phone"] or ""
+    st.session_state.company_name = user["company_name"] or ""
 
 
 def remember_navigation(scope: str, default_page: str) -> None:
@@ -913,7 +996,56 @@ def money_text(value: float | int | None) -> str:
 
 def order_summary(order: dict[str, Any]) -> str:
     date = str(order["date"] or "")[:16]
-    return f"#{order['id']}  {category_text(order['category'])}  ·  {order['status']}  ·  {date}"
+    name = str(order["project_name"] or category_text(order["category"])).replace("\n", " ")
+    name = name.translate(str.maketrans({"[": "［", "]": "］", "(": "（", ")": "）", "<": "〈", ">": "〉"}))
+    return f"#{order['id']}  {name}  ·  {order['status']}  ·  {date}"
+
+
+def order_details_html(order: dict[str, Any]) -> str:
+    fields = [
+        ("프로젝트", order["project_name"]),
+        ("희망 납기", order["desired_date"]),
+        ("요구 공차", order["tolerance"]),
+        ("마감·후처리", order["surface_finish"]),
+    ]
+    items = "".join(
+        f'<div><span>{label}</span><b>{html.escape(str(value))}</b></div>'
+        for label, value in fields if value
+    )
+    return f'<div class="order-details">{items}</div>' if items else ""
+
+
+def render_plain_field(label: str, value: str) -> None:
+    st.markdown(
+        f'<div class="plain-field"><strong>{html.escape(label)}</strong>'
+        f'<p>{html.escape(str(value))}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def export_orders_csv(orders: list[dict[str, Any]]) -> bytes:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    columns = [
+        ("발주번호", "id"), ("접수일", "date"), ("상태", "status"),
+        ("프로젝트", "project_name"), ("회원", "username"), ("회사명", "company_name"),
+        ("휴대폰", "phone"), ("가공", "category"), ("재료", "material"),
+        ("규격", "details"), ("수량", "quantity"), ("예상금액", "cost"),
+        ("최종금액", "quoted_cost"), ("희망납기", "desired_date"),
+        ("제시납기", "quoted_delivery"), ("요청사항", "request_note"),
+    ]
+    writer.writerow([label for label, _ in columns])
+    for order in orders:
+        values = []
+        for _, key in columns:
+            value = str(order[key] or "")
+            if key == "category":
+                value = category_text(value)
+            if value.lstrip().startswith(("=", "+", "-", "@")):
+                value = "'" + value
+            values.append(value)
+        writer.writerow(values)
+    return output.getvalue().encode("utf-8-sig")
 
 
 def dimension_line(
@@ -1147,6 +1279,65 @@ def render_estimate_summary(weight: float, kg_price: float, estimate: float) -> 
     )
 
 
+def render_price_breakdown(base: float, material_each: float, machining_each: float, quantity: int) -> None:
+    """자동 계산의 근거를 고객이 바로 읽을 수 있게 보여줍니다."""
+    st.markdown(
+        '<div class="price-breakdown">'
+        f'<div><span>기본 가공비</span><strong>{money_text(base)}</strong></div>'
+        f'<div><span>재료비 · {quantity}개</span><strong>{money_text(material_each * quantity)}</strong></div>'
+        f'<div><span>치수·홀 가공비 · {quantity}개</span><strong>{money_text(machining_each * quantity)}</strong></div>'
+        '</div>', unsafe_allow_html=True,
+    )
+
+
+def render_workflow() -> None:
+    st.markdown(
+        '<div class="workflow-title">가공 요청은 이렇게 진행됩니다</div>'
+        '<div class="process-grid">'
+        '<div class="process-item"><b><i>01</i> 가공 방식</b><span>밀링·선반·도면 검토 중 선택</span></div>'
+        '<div class="process-item"><b><i>02</i> 규격과 재료</b><span>치수·수량과 요청 사항 입력</span></div>'
+        '<div class="process-item"><b><i>03</i> 견적 확인</b><span>기본 형상은 예상 금액 바로 확인</span></div>'
+        '<div class="process-item"><b><i>04</i> 요청 접수</b><span>로그인 후 대표자가 도면·조건 검토</span></div>'
+        '</div><div class="workflow-footnote">대표자 견적을 확인한 뒤 카드 결제 방법을 안내합니다. 이 화면에서는 결제되지 않습니다.</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_order_options(prefix: str, category: str) -> dict[str, str]:
+    st.markdown('<div class="section-title detail-heading">제작 조건</div>', unsafe_allow_html=True)
+    first, second = st.columns(2, gap="medium")
+    with first:
+        project_name = st.text_input(
+            "부품명 또는 프로젝트명", placeholder="예: 설비 브래킷 시제품",
+            max_chars=100, key=f"{prefix}_project",
+        )
+        tolerance = st.selectbox(
+            "요구 공차", ["일반 공차", "±0.1 mm", "±0.05 mm", "도면 기준 · 협의"],
+            key=f"{prefix}_tolerance",
+        )
+    with second:
+        desired_date = st.text_input(
+            "희망 납기", placeholder="예: 10월 중순 / 협의 가능",
+            max_chars=100, key=f"{prefix}_date",
+        )
+        finish = st.selectbox(
+            "마감·후처리", ["기본 가공면", "버 제거", "표면 처리 협의", "도면 기준 · 협의"],
+            key=f"{prefix}_finish",
+        )
+    note = st.text_area(
+        "추가 요청 사항", placeholder="가공할 면, 나사·홈, 검사 기준 등을 적어 주세요.",
+        max_chars=2000, key=f"{prefix}_note",
+    )
+    st.caption("공차·후처리·납기는 대표자가 확인한 뒤 최종 견적에 반영합니다.")
+    return {
+        "project_name": project_name.strip() or f"{category} 가공 요청",
+        "desired_date": desired_date.strip(),
+        "tolerance": tolerance,
+        "surface_finish": finish,
+        "request_note": note.strip(),
+    }
+
+
 def show_temporary_alert(message: str, nonce: int) -> None:
     message_json = json.dumps(message, ensure_ascii=False)
     components.html(
@@ -1255,6 +1446,12 @@ def render_auth(embedded: bool = False) -> None:
                 help="견적 확인과 주문 안내 연락에 사용합니다.",
                 key=f"reg_phone_{form_suffix}",
             )
+            reg_company = ""
+            if reg_type == "사업자":
+                reg_company = st.text_input(
+                    "회사명 (선택)", placeholder="견적서에 표시할 회사명",
+                    max_chars=100, key=f"reg_company_{form_suffix}",
+                )
             reg_pw = st.text_input(
                 "비밀번호", type="password", key=f"reg_pw_{form_suffix}"
             )
@@ -1268,7 +1465,7 @@ def render_auth(embedded: bool = False) -> None:
                 st.error("비밀번호와 비밀번호 확인이 일치하지 않습니다.")
             else:
                 usertype = "사업자 (B2B)" if reg_type == "사업자" else "개인 고객 (B2C)"
-                ok, message = register_user(reg_id, reg_pw, usertype, reg_phone)
+                ok, message = register_user(reg_id, reg_pw, usertype, reg_phone, reg_company)
                 if not ok:
                     st.error(message)
                 else:
@@ -1346,24 +1543,28 @@ def render_public_home() -> None:
             int(st.session_state.get("auth_alert_nonce", 0)),
         )
         st.session_state.auth_alert = ""
-    app_header(centered=True)
-    _, top_right = st.columns([4, 1])
+    st.markdown(
+        '<div class="site-brand"><span class="brand-mark">KTG</span>'
+        '<span>가공 견적 프로그램</span></div>'
+        '<div class="hero-panel"><div class="hero-overline">정밀 가공 · 온라인 견적 요청</div>'
+        '<h1>필요한 부품, 도면부터 견적까지<br>한곳에서 확인하세요.</h1>'
+        '<p>밀링과 선반은 치수를 바꾸며 예상 금액을 확인하고,<br>'
+        '복잡한 형상은 도면과 제작 조건을 보내 검토받을 수 있습니다.</p>'
+        '<div class="hero-highlights"><span>도면 중심 접수</span><span>예상 견적 확인</span>'
+        '<span>발주 진행 상태 조회</span></div></div>', unsafe_allow_html=True,
+    )
+    left, top_right = st.columns([3.5, 1.4], gap="medium", vertical_alignment="center")
+    with left:
+        st.markdown(
+            '<div class="home-intro"><b>가공 방식을 골라 시작하세요.</b>'
+            '<span>아래 도면에서 치수와 형상을 바로 확인할 수 있습니다.</span></div>',
+            unsafe_allow_html=True,
+        )
     with top_right:
         if st.button("로그인 / 회원가입", use_container_width=True):
             st.session_state.show_order_auth = True
             st.session_state.auth_alert = ""
             st.rerun()
-    st.markdown(
-        """
-        <div class="process-grid">
-          <div class="process-item"><b>1. 가공 방식 선택</b><span>밀링, 선반, 도면 검토 중에서 선택합니다.</span></div>
-          <div class="process-item"><b>2. 규격 입력</b><span>재료와 치수, 주문 수량을 입력합니다.</span></div>
-          <div class="process-item"><b>3. 예상 견적 확인</b><span>도형과 예상 금액을 바로 확인합니다.</span></div>
-          <div class="process-item"><b>4. 주문 요청</b><span>로그인 후 검토 요청을 접수합니다.</span></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     render_new_order(show_header=False)
     if st.session_state.show_order_auth:
         render_auth_dialog()
@@ -1376,12 +1577,11 @@ def render_new_order(show_header: bool = True) -> None:
         st.success(st.session_state.flash)
         st.session_state.flash = ""
     order_type = st.radio(
-        "가공 방식",
+        "가공 방식 선택",
         ["MCT(밀링)", "CNC(선반)", "기타 도면 첨부"],
         horizontal=True,
         key="order_type",
     )
-    st.divider()
     if order_type == "MCT(밀링)":
         render_milling_order()
     elif order_type == "CNC(선반)":
@@ -1392,9 +1592,9 @@ def render_new_order(show_header: bool = True) -> None:
 
 def render_milling_order() -> None:
     pricing = get_pricing_settings()
-    preview_slot = st.container()
+    preview_slot = st.container(key="drawing_stage")
 
-    st.markdown('<div class="section-title">밀링 규격 입력</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title spec-title">01 · 밀링 기본 규격</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3, gap="medium")
     with c1:
         material = st.selectbox("재료", list(MATERIALS), key="m_material")
@@ -1405,10 +1605,7 @@ def render_milling_order() -> None:
     with c3:
         holes = st.number_input("홀 수량 (개)", min_value=0, value=0, step=1)
         quantity = st.number_input("주문 수량 (개)", min_value=1, value=1, step=1)
-    note = st.text_area(
-        "추가 요청 사항",
-        placeholder="공차, 표면 처리, 모서리 처리, 원하는 납기처럼 도면에 없는 내용을 적어 주세요.",
-    )
+    options = render_order_options("m", "밀링")
 
     density = MATERIALS[material]["density"]
     kg_price = pricing[MATERIALS[material]["price_key"]]
@@ -1423,15 +1620,22 @@ def render_milling_order() -> None:
     estimate = pricing["milling_base"] + (material_each + machining_each) * int(quantity)
 
     with preview_slot:
-        st.markdown('<div class="preview-title">입력 규격 미리보기</div>', unsafe_allow_html=True)
-        st.caption("도면을 먼저 확인한 뒤 아래 치수를 조정하세요. 평면도와 측면도는 같은 빗금과 치수 표기 기준을 사용합니다.")
+        st.markdown('<div class="drawing-heading"><span>규격 도면</span><b>MCT · 밀링</b></div>', unsafe_allow_html=True)
         show_svg(draw_milling_svg(width, length, thickness, int(holes)), "milling")
+        st.markdown(
+            f'<div class="dimension-chips"><span>가로 <b>{width:g} mm</b></span>'
+            f'<span>세로 <b>{length:g} mm</b></span><span>두께 <b>{thickness:g} mm</b></span>'
+            f'<span>홀 <b>{int(holes)}개</b></span></div>', unsafe_allow_html=True,
+        )
+        render_workflow()
 
+    st.markdown('<div class="section-title spec-title">02 · 예상 견적</div>', unsafe_allow_html=True)
     render_estimate_summary(weight, kg_price, estimate)
+    render_price_breakdown(pricing["milling_base"], material_each, machining_each, int(quantity))
     st.markdown(
         '<div class="estimate-note">입력한 기본 규격을 기준으로 계산한 예상 금액입니다. '
         '공차, 가공 면수, 형상 난이도, 표면 처리와 납기에 따라 최종 견적이 달라질 수 있습니다. '
-        '주문 접수 단계의 결제 방식은 카드입니다.</div>',
+        '견적을 요청하면 대표자가 최종 금액과 납기를 제시합니다. 결제 안내는 견적 수락 후 진행합니다.</div>',
         unsafe_allow_html=True,
     )
     if st.button("이 조건으로 밀링 주문 요청", use_container_width=True):
@@ -1448,7 +1652,7 @@ def render_milling_order() -> None:
                 "diameter_mm": None,
                 "hole_count": int(holes),
                 "unit_weight_kg": weight,
-                "request_note": note,
+                **options,
                 "attachment_name": "",
                 "attachment_mime": "",
                 "attachment_data": None,
@@ -1458,9 +1662,9 @@ def render_milling_order() -> None:
 
 def render_lathe_order() -> None:
     pricing = get_pricing_settings()
-    preview_slot = st.container()
+    preview_slot = st.container(key="drawing_stage")
 
-    st.markdown('<div class="section-title">선반 규격 입력</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title spec-title">01 · 선반 기본 규격</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3, gap="medium")
     with c1:
         material = st.selectbox("재료", list(MATERIALS), key="l_material")
@@ -1469,11 +1673,7 @@ def render_lathe_order() -> None:
     with c3:
         length = st.number_input("길이 L (mm)", min_value=0.1, value=150.0, step=1.0)
     quantity = st.number_input("주문 수량 (개)", min_value=1, value=1, step=1, key="l_qty")
-    note = st.text_area(
-        "추가 요청 사항",
-        placeholder="공차, 나사, 홈, 표면 처리, 원하는 납기처럼 도면에 없는 내용을 적어 주세요.",
-        key="l_note",
-    )
+    options = render_order_options("l", "선반")
 
     density = MATERIALS[material]["density"]
     kg_price = pricing[MATERIALS[material]["price_key"]]
@@ -1486,15 +1686,21 @@ def render_lathe_order() -> None:
     estimate = pricing["lathe_base"] + (material_each + machining_each) * int(quantity)
 
     with preview_slot:
-        st.markdown('<div class="preview-title">입력 규격 미리보기</div>', unsafe_allow_html=True)
-        st.caption("도면을 먼저 확인한 뒤 아래 치수를 조정하세요. 측면도와 정면도는 밀링 도면과 같은 빗금과 치수 표기 기준을 사용합니다.")
+        st.markdown('<div class="drawing-heading"><span>규격 도면</span><b>CNC · 선반</b></div>', unsafe_allow_html=True)
         show_svg(draw_lathe_svg(diameter, length), "lathe")
+        st.markdown(
+            f'<div class="dimension-chips"><span>지름 <b>{diameter:g} mm</b></span>'
+            f'<span>길이 <b>{length:g} mm</b></span></div>', unsafe_allow_html=True,
+        )
+        render_workflow()
 
+    st.markdown('<div class="section-title spec-title">02 · 예상 견적</div>', unsafe_allow_html=True)
     render_estimate_summary(weight, kg_price, estimate)
+    render_price_breakdown(pricing["lathe_base"], material_each, machining_each, int(quantity))
     st.markdown(
         '<div class="estimate-note">입력한 기본 규격을 기준으로 계산한 예상 금액입니다. '
         '공차, 나사·홈 가공, 형상 난이도, 표면 처리와 납기에 따라 최종 견적이 달라질 수 있습니다. '
-        '주문 접수 단계의 결제 방식은 카드입니다.</div>',
+        '견적을 요청하면 대표자가 최종 금액과 납기를 제시합니다. 결제 안내는 견적 수락 후 진행합니다.</div>',
         unsafe_allow_html=True,
     )
     if st.button("이 조건으로 선반 주문 요청", use_container_width=True):
@@ -1511,7 +1717,7 @@ def render_lathe_order() -> None:
                 "diameter_mm": diameter,
                 "hole_count": 0,
                 "unit_weight_kg": weight,
-                "request_note": note,
+                **options,
                 "attachment_name": "",
                 "attachment_mime": "",
                 "attachment_data": None,
@@ -1521,9 +1727,27 @@ def render_lathe_order() -> None:
 
 def render_drawing_order() -> None:
     st.markdown(
-        '<div class="notice-card"><b>복잡한 형상은 도면으로 검토받으세요.</b><br>'
-        '도면과 요청 사항을 확인한 뒤 대표자가 견적, 확인 질문과 진행 내용을 주문 내역에 남깁니다. '
-        '결제 방식은 카드로 접수됩니다.</div>',
+        '<div class="drawing-heading drawing-heading-spaced"><span>도면 검토</span><b>기타 가공 의뢰</b></div>'
+        '<div class="drawing-upload-art" aria-label="가공 도면 접수 안내">'
+        '<svg viewBox="0 0 760 230" role="img" aria-label="평면도, 단면도, 치수 도면의 예시">'
+        '<defs><pattern id="hatch" width="12" height="12" patternUnits="userSpaceOnUse" '
+        'patternTransform="rotate(45)"><rect width="12" height="12" fill="#eaf2f8"/>'
+        '<path d="M0 0V12" stroke="#9ebed1" stroke-width="3"/></pattern></defs>'
+        '<rect x="60" y="43" width="250" height="140" rx="6" fill="url(#hatch)" stroke="#477c9b" stroke-width="2"/>'
+        '<circle cx="110" cy="86" r="13" fill="white" stroke="#477c9b" stroke-width="2"/>'
+        '<circle cx="260" cy="143" r="13" fill="white" stroke="#477c9b" stroke-width="2"/>'
+        '<path d="M60 27H310M44 43V183" stroke="#496b82" stroke-width="1.5"/>'
+        '<text x="185" y="22" text-anchor="middle" fill="#2e4c63" font-size="15">가공 형상 · 평면도</text>'
+        '<path d="M423 115h270" stroke="#496b82" stroke-width="1.5" stroke-dasharray="7 5"/>'
+        '<circle cx="555" cy="115" r="69" fill="url(#hatch)" stroke="#477c9b" stroke-width="2"/>'
+        '<text x="555" y="214" text-anchor="middle" fill="#2e4c63" font-size="15">치수 · 홀 · 단면</text>'
+        '</svg><p>도면과 제작 조건을 함께 보내주시면 검토 후 견적을 안내합니다.</p></div>',
+        unsafe_allow_html=True,
+    )
+    render_workflow()
+    st.markdown(
+        '<div class="notice-card"><b>도면에 표시된 내용과 별도로 필요한 조건을 적어 주세요.</b><br>'
+        '공차·마감·희망 납기까지 알려주시면 대표자가 내용을 검토한 뒤 최종 견적을 제시합니다.</div>',
         unsafe_allow_html=True,
     )
     with st.form("drawing_order_form"):
@@ -1534,12 +1758,20 @@ def render_drawing_order() -> None:
         with c2:
             uploaded = st.file_uploader(
                 "도면 파일",
-                type=["jpg", "jpeg", "png", "pdf"],
-                help="JPG, PNG, PDF 파일을 지원하며 최대 10MB까지 첨부할 수 있습니다.",
+                type=["jpg", "jpeg", "png", "pdf", "step", "stp", "dxf", "dwg", "igs", "iges"],
+                help="이미지·PDF·STEP·DXF·DWG·IGES 파일을 지원하며 최대 10MB까지 첨부할 수 있습니다.",
             )
+        n1, n2 = st.columns(2)
+        with n1:
+            project_name = st.text_input("부품명 또는 프로젝트명", max_chars=100, placeholder="예: 샤프트 가공품")
+            tolerance = st.text_input("공차·검사 기준", max_chars=100, placeholder="예: 도면 기준")
+        with n2:
+            desired_date = st.text_input("희망 납기", max_chars=100, placeholder="예: 10월 중순 / 협의 가능")
+            finish = st.text_input("표면 처리·마감", max_chars=100, placeholder="예: 버 제거 후 아노다이징")
         note = st.text_area(
             "추가 요청 사항",
-            placeholder="가공 부위, 공차, 표면 처리, 기준 수량, 원하는 납기처럼 도면에 없는 내용을 적어 주세요.",
+            placeholder="가공할 부위, 재료 지급 여부, 중요한 검사 치수 등 도면에 없는 내용을 적어 주세요.",
+            max_chars=2000,
         )
         submitted = st.form_submit_button("도면 검토와 견적 요청", use_container_width=True)
 
@@ -1564,7 +1796,11 @@ def render_drawing_order() -> None:
                 "diameter_mm": None,
                 "hole_count": 0,
                 "unit_weight_kg": 0,
-                "request_note": note,
+                "project_name": project_name.strip() or "도면 검토 요청",
+                "desired_date": desired_date.strip(),
+                "tolerance": tolerance.strip(),
+                "surface_finish": finish.strip(),
+                "request_note": note.strip(),
                 "attachment_name": Path(uploaded.name).name,
                 "attachment_mime": uploaded.type or "application/octet-stream",
                 "attachment_data": data,
@@ -1573,7 +1809,7 @@ def render_drawing_order() -> None:
 
 
 def render_my_orders() -> None:
-    app_header("견적 답변과 가공 일정을 발주별로 확인할 수 있습니다.")
+    app_header("요청한 부품의 견적, 답변과 가공 진행 상황을 확인하세요.")
     orders = get_orders(st.session_state.username)
     if not orders:
         st.info("아직 접수한 발주가 없습니다.")
@@ -1588,9 +1824,25 @@ def render_my_orders() -> None:
             c.markdown(
                 f"**금액**  \n{money_text(final_cost) if final_cost > 0 else '견적 검토 중'}"
             )
-            st.markdown(f"**규격**  \n{order['details'] or '-'}")
+            render_plain_field("규격", order["details"] or "-")
+            st.markdown(order_details_html(order), unsafe_allow_html=True)
             if order["request_note"]:
-                st.markdown(f"**요청 사항**  \n{order['request_note']}")
+                render_plain_field("요청 사항", order["request_note"])
+            if order["quoted_delivery"]:
+                render_plain_field("제시 납기", order["quoted_delivery"])
+            if order["quote_valid_until"]:
+                st.caption(f"견적 유효기간: {order['quote_valid_until']}까지")
+            if order["quote_accepted_at"]:
+                st.success(f"{order['quote_accepted_at'][:16]}에 견적을 확인했습니다. 결제는 별도 안내됩니다.")
+            elif order["status"] == "견적 제안" and final_cost > 0:
+                if order["quote_valid_until"] and order["quote_valid_until"] < now_text()[:10]:
+                    st.warning("견적 유효기간이 지났습니다. 대표자에게 재확인을 요청해 주세요.")
+                elif st.button("제시 견적 확인 · 진행 요청", key=f"accept_{order['id']}"):
+                    if accept_quote(order["id"], st.session_state.username):
+                        st.success("견적 확인을 기록했습니다. 결제와 제작 일정은 별도로 안내됩니다.")
+                        st.rerun()
+                    else:
+                        st.error("견적 상태가 변경되었습니다. 새로고침 후 다시 확인해 주세요.")
             if order["admin_reply"]:
                 st.markdown(
                     f'<div class="notice-card"><b>대표 관리자 답변</b><br>{html.escape(order["admin_reply"]).replace(chr(10), "<br>")}</div>',
@@ -1623,6 +1875,16 @@ def render_account_settings(is_admin: bool) -> None:
                 st.success("연락처를 저장했습니다.")
             else:
                 st.error(result)
+        if not is_admin:
+            with st.form("company_form"):
+                company_name = st.text_input(
+                    "회사명 (사업자 고객)", value=st.session_state.company_name,
+                    max_chars=100, placeholder="견적과 발주에 표시할 회사명",
+                )
+                company_saved = st.form_submit_button("회사명 저장", use_container_width=True)
+            if company_saved:
+                st.session_state.company_name = update_company_name(st.session_state.username, company_name)
+                st.success("회사명을 저장했습니다.")
     with col2:
         st.markdown('<div class="section-title">비밀번호 변경</div>', unsafe_allow_html=True)
         with st.form("password_form"):
@@ -1745,21 +2007,24 @@ def render_admin_orders() -> None:
     orders = get_orders()
     total = len(orders)
     waiting = sum(row["status"] in {"접수", "견적 검토"} for row in orders)
+    quote_pending = sum(row["status"] == "견적 제안" for row in orders)
     drawing_waiting = sum(
         category_text(row["category"]) == "기타 도면 첨부" and not row["admin_reply"]
         for row in orders
     )
     shipped = sum(row["status"] == "출하" for row in orders)
     with st.container(key="desktop_dashboard"):
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("전체 발주", total)
         m2.metric("검토 필요", waiting)
-        m3.metric("도면 답변 대기", drawing_waiting)
-        m4.metric("출하 완료", shipped)
+        m3.metric("고객 확인 대기", quote_pending)
+        m4.metric("도면 답변 대기", drawing_waiting)
+        m5.metric("출하 완료", shipped)
     st.markdown(
         '<div class="dashboard-grid mobile-only">'
         f'<div class="dashboard-item"><span>전체 발주</span><strong>{total}</strong></div>'
         f'<div class="dashboard-item"><span>검토 필요</span><strong>{waiting}</strong></div>'
+        f'<div class="dashboard-item"><span>고객 확인 대기</span><strong>{quote_pending}</strong></div>'
         f'<div class="dashboard-item"><span>도면 답변 대기</span><strong>{drawing_waiting}</strong></div>'
         f'<div class="dashboard-item"><span>출하 완료</span><strong>{shipped}</strong></div>'
         '</div>',
@@ -1775,7 +2040,7 @@ def render_admin_orders() -> None:
             "가공 방식", ["전체", "MCT(밀링)", "CNC(선반)", "기타 도면 첨부"]
         )
     with f3:
-        keyword = st.text_input("아이디 / 휴대폰 / 발주번호 검색")
+        keyword = st.text_input("아이디 / 회사명 / 부품명 / 휴대폰 / 발주번호 검색")
 
     normalized_keyword = keyword.strip().lower()
     filtered = []
@@ -1784,12 +2049,18 @@ def render_admin_orders() -> None:
             continue
         if category_filter != "전체" and category_text(row["category"]) != category_filter:
             continue
-        haystack = f"{row['id']} {row['username']} {row['phone'] or ''}".lower()
+        haystack = f"{row['id']} {row['username']} {row['phone'] or ''} {row['company_name'] or ''} {row['project_name'] or ''}".lower()
         if normalized_keyword and normalized_keyword not in haystack:
             continue
         filtered.append(row)
 
     st.caption(f"검색 결과 {len(filtered)}건")
+    if filtered:
+        st.download_button(
+            "검색한 발주 CSV 저장", export_orders_csv(filtered),
+            file_name=f"KTG_발주목록_{now_text()[:10]}.csv",
+            mime="text/csv", key="export_admin_orders",
+        )
     if not filtered:
         st.info("조건에 맞는 발주가 없습니다.")
         return
@@ -1803,11 +2074,16 @@ def render_admin_orders() -> None:
             i2.markdown(f"**휴대폰**  \n{order['phone'] or '미등록'}")
             i3.markdown(f"**가입 유형**  \n{order['usertype'] or '-'}")
             i4.markdown(f"**접수 일시**  \n{str(order['date'] or '-')[:16]}")
+            if order["company_name"]:
+                render_plain_field("회사명", order["company_name"])
 
             st.markdown(f"**가공 / 재료 / 수량**  \n{category_text(order['category'])} / {order['material'] or '-'} / {order['quantity']}개")
-            st.markdown(f"**규격**  \n{order['details'] or '-'}")
+            render_plain_field("규격", order["details"] or "-")
+            st.markdown(order_details_html(order), unsafe_allow_html=True)
             if order["request_note"]:
-                st.markdown(f"**고객 요청 사항**  \n{order['request_note']}")
+                render_plain_field("고객 요청 사항", order["request_note"])
+            if order["quote_accepted_at"]:
+                st.success(f"고객 견적 확인: {str(order['quote_accepted_at'])[:16]}")
             st.caption(f"자동 계산 참고 금액: {money_text(order['cost'])}")
 
             if order["attachment_data"]:
@@ -1840,11 +2116,28 @@ def render_admin_orders() -> None:
                     value=order["admin_reply"] or "",
                     placeholder="도면 검토 결과, 추가 확인 사항, 견적 설명 등을 입력하세요.",
                 )
+                delivery = st.text_input(
+                    "제작·납품 예상일", value=order["quoted_delivery"] or "",
+                    placeholder="예: 견적 승인 후 7영업일", max_chars=100,
+                )
+                valid_until = st.text_input(
+                    "견적 유효기간 (선택)", value=order["quote_valid_until"] or "",
+                    placeholder="YYYY-MM-DD", max_chars=10,
+                )
                 save = st.form_submit_button("답변과 진행 상태 저장", use_container_width=True)
             if save:
-                update_order_by_admin(order["id"], new_status, quote, reply)
-                st.success(f"발주 #{order['id']}번의 내용을 저장했습니다.")
-                st.rerun()
+                try:
+                    if valid_until:
+                        try:
+                            datetime.strptime(valid_until, "%Y-%m-%d")
+                        except ValueError as exc:
+                            raise ValueError("견적 유효기간을 YYYY-MM-DD 형식으로 입력해 주세요.") from exc
+                    update_order_by_admin(order["id"], new_status, quote, reply, delivery, valid_until)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success(f"발주 #{order['id']}번의 내용을 저장했습니다.")
+                    st.rerun()
 
 
 def render_customer_contacts() -> None:
@@ -1852,11 +2145,11 @@ def render_customer_contacts() -> None:
     with db_connection() as conn:
         users = conn.execute(
             """
-            SELECT u.username, u.usertype, u.phone, u.created_at, COUNT(o.id) AS order_count
+            SELECT u.username, u.usertype, u.phone, u.company_name, u.created_at, COUNT(o.id) AS order_count
             FROM users u
             LEFT JOIN orders o ON o.username=u.username
             WHERE COALESCE(u.role, 'customer')='customer'
-            GROUP BY u.username, u.usertype, u.phone, u.created_at
+            GROUP BY u.username, u.usertype, u.phone, u.company_name, u.created_at
             ORDER BY order_count DESC, u.username
             """
         ).fetchall()
@@ -1868,7 +2161,7 @@ def render_customer_contacts() -> None:
             f"""
             <div class="soft-card" style="margin-bottom:.7rem">
               <b>{html.escape(user['username'])}</b><br>
-              <span class="muted">{html.escape(user['usertype'] or '-')} · {html.escape(user['phone'] or '휴대폰 미등록')} · 발주 {user['order_count']}건</span>
+              <span class="muted">{html.escape(user['company_name'] or user['usertype'] or '-')} · {html.escape(user['phone'] or '휴대폰 미등록')} · 발주 {user['order_count']}건</span>
             </div>
             """,
             unsafe_allow_html=True,
